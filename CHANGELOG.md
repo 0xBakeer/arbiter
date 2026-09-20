@@ -11,6 +11,59 @@ therefore a measurement epoch — the configuration as it stood, and the figures
 Every entry leads with **Defaults that changed**, because that is the part that alters what you
 would measure if you ran the recipe yourself. `./run.sh` prints the version it was launched from.
 
+## Unreleased
+
+A third engine, opt-in, on a lane that already had two dtypes and one backend.
+
+### Defaults that changed
+
+None. `ARBITER_ENGINE` still defaults to `laya`, torch is still what a Mac serves unless it is
+told otherwise, and every figure in [bench/results.md](bench/results.md) taken before this still
+belongs to the path it was taken on.
+
+### Added
+
+- **`laya_mlx` engine (Apple Silicon, opt-in)** — [`engines/laya_mlx/loader.py`](engines/laya_mlx/loader.py)
+  serves the same three checkpoints through [mizorewww/laya-mlx](https://github.com/mizorewww/laya-mlx),
+  an independent MLX reimplementation of the ModernBERT encoder and Laya's decision heads, over
+  the converted `aac6fef/laya-*-mlx` weights. Same engine interface, same rows, same padded
+  batching from the same micro-batcher, same routing — `laya_mlx.router` is upstream's router and
+  decides 7/7 equivalence cases identically. Selected with `ARBITER_ENGINE=laya_mlx`; on any
+  machine that is not Apple silicon it refuses at startup with one line instead of an ImportError
+  out of a wheel that does not exist there.
+- **`ARBITER_ENGINE=laya_mlx ./run.sh setup`** — adds `laya-mlx` and `mlx` to the same `.venv`
+  (nothing it brings conflicts with torch; `pip check` stays clean) and downloads the three
+  converted checkpoints into `models/laya-mlx/`. It remains a superset of the torch setup,
+  because the equivalence reference is `laya.Agent` under torch and `ARBITER_ENGINE=laya` has to
+  keep working on the same checkout.
+- **[`tools/equivalence_mlx.py`](tools/equivalence_mlx.py)** — the gate for the new engine, on the
+  same 22 questions and against the same reference, plus a routing comparison. Wired into
+  `ARBITER_ENGINE=laya_mlx ./run.sh equivalence`. **fp32 ships** because it is the only one that
+  passes: max |Δp| **0.00e+00** across all three checkpoints, where fp16 is 1.69e-02 and bf16
+  moves an argmax.
+- **`ARBITER_MLX_CACHE_MB`, default 1024** — MLX keeps freed buffers for reuse without a bound,
+  which on a server that forms a new shape per batch reached a 23 GB footprint and *cost*
+  throughput as callers were added (39 q/s at eight, against 103 with the bound). `0` restores
+  MLX's own behaviour.
+- **`/readyz` now reports `engine`**, and `bench/bench.py` labels its section with
+  `ARBITER_ENGINE`, so a measurement says which backend produced it.
+
+### Measured
+
+One M2 Max, 2026-09-20, with the torch server resident on the same GPU and a paired control taken
+minutes later. Against that control: **22.7 ms** for one question (30.5), 59.2 / 102.7 / 448.4 ms
+for 5 / 10 / 50 (62.8 / 107.1 / 545.9), and 75 / 103 / 109 q/s at 1 / 8 / 32 callers, which is a
+tie. The difference worth switching for is the cold load: **2.1 s to `/readyz`** against 88-101 s.
+Full tables, the control and the cache evidence in [bench/results.md](bench/results.md).
+
+### Documentation
+
+- [recipes/apple](recipes/apple/README.md) gains **Option 3: the MLX engine** — install, defaults,
+  the measured tables, the equivalence numbers and what the lane still owes. The "what an MLX port
+  could buy" section that predicted this is replaced by what it actually bought.
+- [CREDITS.md](CREDITS.md) credits the port and the converted checkpoints;
+  [engines/README.md](engines/README.md) now says which packages are here and what each runs on.
+
 ## v0.1.1 — 2026-09-20
 
 Documentation only. The recordings that were made for the write-up now live in the repository,
