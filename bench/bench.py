@@ -167,13 +167,15 @@ def main():
               % (c, res["questions_per_s"], res["p50_ms"], res["p95_ms"], res["errors"]))
 
     gpu = accelerator_name()
-    payload = {"date": str(date.today()), "gpu": gpu, "mode": info.get("mode", args.label),
+    payload = {"date": str(date.today()), "gpu": gpu, "engine": info.get("engine", "laya"),
+               "mode": info.get("mode", args.label),
                "dtype": info.get("dtype", "autocast"), "device": info.get("device"),
                "models": info.get("models"), "version": info.get("version"),
                "latency": rows, "throughput": conc}
 
-    md = ["", "## %s -- %s, `ARBITER_DEVICE=%s`, `ARBITER_MODE=%s`, `ARBITER_DTYPE=%s`"
-          % (payload["date"], gpu, payload["device"], payload["mode"], payload["dtype"]), "",
+    md = ["", "## %s -- %s, `ARBITER_ENGINE=%s`, `ARBITER_DEVICE=%s`, `ARBITER_MODE=%s`, `ARBITER_DTYPE=%s`"
+          % (payload["date"], gpu, payload["engine"], payload["device"], payload["mode"],
+             payload["dtype"]), "",
           "Checkpoints loaded: %s. Server version %s." % (", ".join(payload["models"] or []), payload["version"]),
           "", "### Latency, one caller, auto-routed English state", "",
           "| questions in the call | p50 | p95 | per question |", "|---:|---:|---:|---:|"]

@@ -46,7 +46,10 @@ numbers, because the wheels and the measurements differ by machine:
   wheels come from the CUDA 13.0 index, which has both aarch64 and x86_64 builds, so this is not
   specific to any one box.
 - **Apple Silicon → [recipes/apple](recipes/apple/README.md)**, torch's MPS backend from plain
-  PyPI. fp32 parameters, no CUDA graphs, and a slower cold load; the recipe says why.
+  PyPI. fp32 parameters, no CUDA graphs, and a slower cold load; the recipe says why. There is
+  also an opt-in third engine on that lane, `ARBITER_ENGINE=laya_mlx`, which runs the community
+  MLX port instead of torch: a quarter off a single question and a cold load of two seconds
+  instead of ninety.
 
 `./run.sh setup` picks the lane from `uname`, and the device is detected rather than configured:
 `ARBITER_DEVICE` defaults to cuda if there is a CUDA device, else mps, else cpu.
@@ -220,12 +223,15 @@ figures in [bench/results.md](bench/results.md).
 | GB10, LLM idle | **20.9 ms** | **31.1 ms** | **40.0 ms** | **152.4 ms** | 135 / 287 / 301 q/s |
 | GB10, next to a busy LLM | 326.6 ms | 278.6 ms | 258.1 ms | 381.6 ms | 23 / 88 / 153 q/s |
 | Apple M2 Max, fp32 | **30.3 ms** | **63.1 ms** | **107.4 ms** | **462.3 ms** | 72 / 102 / 106 q/s |
+| Apple M2 Max, `laya_mlx` engine, fp32 | **22.7 ms** | **59.2 ms** | **102.7 ms** | **448.4 ms** | 75 / 103 / 109 q/s |
 | model card, T4 english | 39.5 ms | — | 158.6 ms | 771 ms | — |
 | model card, T4 multilingual | 32.8 ms | — | 72.3 ms | 337 ms | — |
 
-The M2 Max ceiling arrives at eight callers and does not move after that. The T4 figures are the
-model card's own, in-process SDK calls on older hardware; they are here for scale, not as a
-ranking.
+The M2 Max ceiling arrives at eight callers and does not move after that, on either engine. The
+MLX row is the opt-in Apple-silicon engine and was taken with the torch server still resident on
+the same GPU; its paired control and the rest of its numbers -- including a cold load of 2.1 s
+against 88-101 s -- are in [bench/results.md](bench/results.md). The T4 figures are the model
+card's own, in-process SDK calls on older hardware; they are here for scale, not as a ranking.
 
 ### The two settings that are worth understanding
 
@@ -270,15 +276,16 @@ is inside the gate but not nothing.
 |---|---|---|
 | `PORT` / `HOST` | `8010` / `0.0.0.0` | |
 | `ARBITER_DEVICE` | detected | `cuda`, else `mps`, else `cpu`; set it to pin one, and `/readyz` reports what was taken |
-| `ARBITER_ENGINE` | `laya` | which package under [`engines/`](engines) serves the requests |
+| `ARBITER_ENGINE` | `laya` | which package under [`engines/`](engines) serves the requests; `laya_mlx` is the Apple-silicon MLX engine, opt-in |
 | `ARBITER_MODELS` | all three | comma-separated; a subset saves memory, and the router falls back to what is loaded |
 | `ARBITER_MODE` | `eager` | or `graphs`, which is CUDA-only and refuses to run anywhere else |
-| `ARBITER_DTYPE` | `autocast` | or `bf16` on CUDA; `fp16` and `bf16` on MPS, where autocast means fp32 |
+| `ARBITER_DTYPE` | `autocast` | or `bf16` on CUDA; `fp16` and `bf16` on MPS, where autocast means fp32; `fp32` (default), `fp16` or `bf16` under `laya_mlx` |
 | `ARBITER_API_KEY` | unset | set it to require `Authorization: Bearer` |
 | `ARBITER_BATCH_WAIT_MS` | `2` | how long a batch waits for company |
 | `ARBITER_MAX_BATCH` | `64` | question rows per forward |
 | `ARBITER_MAX_QUEUE` | `256` | rows in flight before `529` |
 | `ARBITER_GRAPH_MAX_MARKERS` | `32` | questions with more options than this take the eager path |
+| `ARBITER_MLX_CACHE_MB` | `1024` | `laya_mlx` only: how much freed GPU memory MLX may keep for reuse; `0` is its own unbounded default |
 | `MODELS_DIR` | `./models` | |
 
 ## Runs next to an LLM

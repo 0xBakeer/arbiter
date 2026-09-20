@@ -28,6 +28,25 @@ paraphrasing a limitation is usually a way of softening it.
 - Model: https://huggingface.co/convaiinnovations/laya
 - SDK: https://github.com/NandhaKishorM/laya · https://pypi.org/project/laya/
 
+## The MLX port
+
+**[mizorewww/laya-mlx](https://github.com/mizorewww/laya-mlx)** — the independent MLX port,
+Apache-2.0, which is the whole of what `engines/laya_mlx/` runs. The ModernBERT encoder, the
+decision head, the scorer and the act head are reimplemented there in MLX against the same
+weights, and the prompt construction, the temperature buckets, the language detection and the
+router are carried over from upstream. Our loader is a server around it — it builds rows with
+`laya_mlx.common`, batches them into `Agent.forward`, and routes with `laya_mlx.router` — in
+exactly the way `engines/laya/loader.py` is a server around the SDK. The parity work in their
+BENCHMARKS.md is also why we knew where to point our own gate before running it.
+
+**[aac6fef](https://huggingface.co/aac6fef)** — the converted checkpoints the MLX engine loads,
+one repo per checkpoint, each with its model card, provenance and file checksums.
+
+- Port: https://github.com/mizorewww/laya-mlx · https://pypi.org/project/laya-mlx/
+- Checkpoints: https://huggingface.co/aac6fef/laya-mlx ·
+  https://huggingface.co/aac6fef/laya-multilingual-mlx ·
+  https://huggingface.co/aac6fef/laya-typed-decisions-mlx
+
 ## The encoders
 
 **[Answer.AI](https://huggingface.co/answerdotai/ModernBERT-large)** — ModernBERT-large, the
@@ -76,6 +95,8 @@ the file for that reason.
 
 **[PyTorch](https://pytorch.org)** — including the CUDA 13.0 wheel index that makes the same
 `./run.sh setup` work on aarch64 and x86_64.
+**[MLX](https://github.com/ml-explore/mlx)** — Apple's array framework, which the third engine
+runs on and which is the reason that engine exists at all.
 **[Hugging Face](https://huggingface.co)** — `transformers` for the encoder implementations,
 `tokenizers`, `safetensors` for the weights, and `huggingface_hub` for the download.
 **[FastAPI](https://fastapi.tiangolo.com)** and **[uvicorn](https://www.uvicorn.org)** — the

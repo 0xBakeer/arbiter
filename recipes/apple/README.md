@@ -4,6 +4,11 @@ torch's MPS backend, `ARBITER_DEVICE=mps`, eager forward, fp32 parameters. `./ru
 all of it, and no environment variable has to be set: the device is detected and `autocast`,
 which is a CUDA mode, resolves to fp32 here.
 
+That is the shipped lane and everything down to ["Which dtype ships, and
+why"](#which-dtype-ships-and-why) describes it. There is a second, opt-in one on the same
+machine -- [Option 3: the MLX engine](#option-3-the-mlx-engine) -- which swaps torch for the
+community MLX port and is measured against these rows there.
+
 ## Install
 
 ```bash
@@ -135,19 +140,135 @@ publishing one invites the trade the gate exists to refuse.
 - **A cold load of a minute and a half**, which makes a restart during a deploy visible in a way
   it is not on the GB10's 20-60 s.
 
-## What an MLX port could buy, as future work
+## Option 3: the MLX engine
 
-Everything above is torch's MPS backend, which dispatches the same op graph it dispatches on
-CUDA through Metal shaders it did not choose the layout for. MLX is the other direction: arrays
-that live in unified memory with no host/device copy at all, kernels written for the M-series,
-lazy evaluation that fuses the small elementwise chains an encoder is full of, and quantised
-formats (4-bit and 8-bit) that are first-class rather than bolted on. For this workload the
-plausible wins are the two numbers that look worst above — the minute-and-a-half cold load,
-which is mostly materialising and copying fp32 weights that MLX would mmap into unified memory
-directly,
-and the 50-question row, which is launch-bound enough that fusion should help more than it does
-on a big discrete GPU. The cost is real: `engines/mlx/` would have to reimplement the ModernBERT
-encoder and Laya's marker head and act head from the checkpoint tensors, and it would arrive
-owing exactly the same equivalence table as this one before any of its numbers could be
-believed. That is the order — port, then gate, then measure — and it is why it is future work
-and not a footnote to this recipe.
+`ARBITER_ENGINE=laya_mlx` serves the same three checkpoints through
+[mizorewww/laya-mlx](https://github.com/mizorewww/laya-mlx), an independent MLX reimplementation
+of the ModernBERT encoder and Laya's decision heads, over converted weights published as
+`aac6fef/laya-mlx`, `aac6fef/laya-multilingual-mlx` and `aac6fef/laya-typed-decisions-mlx`. It is
+opt-in, it changes no default on the torch lane, and both engines live in the same checkout and
+the same `.venv`.
+
+### Install
+
+```bash
+ARBITER_ENGINE=laya_mlx ./run.sh setup       # adds laya-mlx + mlx, and 2.1 GB of converted weights
+ARBITER_ENGINE=laya_mlx ./run.sh serve
+ARBITER_ENGINE=laya_mlx ./run.sh equivalence # the gate, against the SDK on the CPU
+```
+
+`setup` on this path is a superset of the one above: it still installs torch and still fetches
+the upstream tree, because `ARBITER_ENGINE=laya` has to keep working on the same checkout and
+because the equivalence gate's reference is `laya.Agent` under torch. The MLX side adds one
+package (`laya-mlx`, which brings `mlx`, `tokenizers`, `huggingface_hub` and `numpy`) and three
+checkpoint directories under `models/laya-mlx/`. Nothing it installs conflicts with torch --
+`pip check` is clean afterwards -- so there is no sibling `.venv-mlx`.
+
+What it needs: Apple silicon, macOS 26 or newer for the mlx-metal wheel that MLX 0.32 selects
+here, and Python 3.11+. On anything else `run.sh` and the engine both refuse with one line rather
+than failing inside a wheel that does not exist for the architecture.
+
+### Defaults on this lane
+
+| variable | here | why |
+|---|---|---|
+| `ARBITER_ENGINE` | `laya_mlx` | opt-in; the default everywhere else is `laya` |
+| `ARBITER_DEVICE` | `gpu` | MLX has `gpu` and `cpu`. `mps` is torch's name for the same hardware and is refused here rather than silently taken |
+| `ARBITER_DTYPE` | `fp32` | the only one that passes the gate, exactly as on the torch lane. fp16 is the port's own default and is 1.7e-2 out on the multilingual checkpoint |
+| `ARBITER_MODE` | `eager` | there is no graph capture on this engine; `mx.compile` and the port's prefix cache are not wired up |
+| `ARBITER_MLX_CACHE_MB` | `1024` | MLX's buffer cache is unbounded by default, which costs 23 GB and most of the throughput on a server. `0` restores it |
+
+`/readyz` reports `"engine": "laya_mlx"` alongside the mode, dtype and device, and `/v1/models`
+lists the same three ids as the torch lane -- the checkpoints, the aliases and the routing are
+the same; only the arithmetic underneath is different.
+
+### Measured, the same M2 Max
+
+Same method as above, taken 2026-09-20 with the torch server still resident on the same GPU, so
+the column to compare against is the paired control that was run minutes later rather than the
+uncontended rows further up. Full tables and the control: [bench/results.md](../../bench/results.md).
+
+| questions in one call | `laya_mlx`, fp32 | torch MPS, fp32, paired control | torch MPS, published |
+|---:|---:|---:|---:|
+| 1  | **22.7 ms** | 30.5 ms | 30.3 ms |
+| 5  | **59.2 ms** | 62.8 ms | 63.1 ms |
+| 10 | **102.7 ms** | 107.1 ms | 107.4 ms |
+| 50 | **448.4 ms** | 545.9 ms | 462.3 ms |
+
+| concurrency, 4-question calls | `laya_mlx`, fp32 | torch MPS control | torch MPS, published |
+|---:|---:|---:|---:|
+| 1  | **75.4 q/s** | 35.1 q/s | 71.9 q/s |
+| 8  | **102.7 q/s** | 103.1 q/s | 101.7 q/s |
+| 32 | **108.7 q/s** | 107.4 q/s | 105.9 q/s |
+
+| | `laya_mlx` | torch MPS |
+|---|---|---|
+| `serve` to `/readyz`, three checkpoints | **2.1 s and 2.2 s** | 88 s and 101 s |
+| `footprint -p` at `/readyz` | 5,786 MB (5,501 MB IOAccelerator) | 5,381-6,131 MB (4,922 MB IOAccelerator) |
+| after a bench run | 5,937 MB, peak 7,800 MB | 6,465 MB, peak 6,767 MB |
+
+Read that as three findings. **The cold load is forty times faster** and is the reason to run this
+engine: two seconds instead of a minute and a half, because MLX maps the converted weights into
+unified memory and casts them there instead of materialising fp32 tensors and copying them onto
+the GPU. **A single question is 25% faster**, which is dispatch cost and nothing else -- the
+advantage shrinks to 5% by ten questions, where the matmuls dominate and both backends are
+running the same ones. **Throughput is a tie**: the GPU is saturated at eight callers either way,
+and the ceiling is the same 102-109 q/s. Resident footprint is also a tie, since both hold the
+same 4.7 GB of fp32 parameters.
+
+### The equivalence numbers
+
+Same 22 questions, same reference (`laya.Agent` on the CPU in fp32), same 5e-3 / 100%-argmax gate:
+
+| parameters | max abs Δp vs reference | argmax | verdict |
+|---|---:|---:|---|
+| **fp32** | **0.00e+00** | 22/22 | **passes** -- every probability is the reference, digit for digit |
+| fp16 | 1.69e-02 | 22/22 | fails |
+| bf16 | 2.00e-02 | 21/22 | fails, and one argmax moves |
+
+The fp32 row is cleaner than torch's own fp32 on this machine (1.0e-04), and the reason is worth
+knowing: the upstream weights are stored in fp16, and both paths widen them -- the SDK to fp32 on
+the CPU, the port to fp32 in MLX -- so there is nothing in the reference for the conversion to
+lose. It also means the port's arithmetic is not approximately right, it is exactly right at the
+four decimals a client sees.
+
+fp16 fails only on the multilingual checkpoint (the other two are at 1.0e-03 and 8.0e-04), which
+is the same checkpoint that fails worst on torch's MPS fp16. Routing was compared as well, since
+the port carries its own adapted copy of upstream's router: 7/7 cases decided identically,
+including the Devanagari one.
+
+### Known limits of this lane
+
+- **No mx.compile and no prefix cache.** The port offers both, plus `pad_to_multiple`; none is
+  wired up here, because the batcher's shapes vary per batch and a shape-specialising compile
+  wants the opposite. Unmeasured, therefore unclaimed.
+- **The buffer cache has to be bounded.** With MLX's unbounded default the server reached a
+  23 GB footprint and *lost* throughput as callers were added -- 39 q/s at eight against 103 with
+  the bound. That is what `ARBITER_MLX_CACHE_MB` is for, and the evidence table is in
+  bench/results.md.
+- **macOS 26+ in practice.** MLX 0.32 publishes macOS 14, 15 and 26 wheels; the installer took
+  the 26 one on this machine. Older macOS versions were not tested here.
+- **A second implementation to trust.** The weights are converted and the encoder is
+  reimplemented, so the equivalence gate is not a formality on this lane the way it is for a
+  dtype change. It is the reason the gate is wired into `./run.sh equivalence` for this engine
+  too.
+
+## What the MLX port bought, and what is still open
+
+The section this replaces was a prediction, written before the port was wired up: that MLX would
+win on the cold load and on the launch-bound end of the latency curve, and that it would owe the
+same equivalence table before any of it could be believed. That is how it came out, and the
+numbers are in [Option 3](#option-3-the-mlx-engine) above: 40× on the cold load, 25% at one
+question, a tie at ten and at every concurrency, and a gate it passes more cleanly than torch
+does. The prediction was wrong in one place -- fifty questions was supposed to be where fusion
+helped most, and it is 3% against the uncontended torch row.
+
+What is still open on this lane:
+
+- **Quantisation.** 4-bit and 8-bit are first-class in MLX and would cut the 4.7 GB of parameters
+  and, plausibly, the fifty-question row. Neither is converted or measured, and on the evidence
+  of fp16 at 1.7e-2 the gate is where they would have to be argued.
+- **`mx.compile`, `pad_to_multiple` and the prefix cache**, which the port measured at about 6.5%
+  on its own Snake demo and which would need the batcher's shape ladder rethought here.
+- **A second machine.** Everything above is one M2 Max. The M-series spread is wide and the
+  port's own figures are from an M3 Max, where a single English question takes 13.4 ms.
