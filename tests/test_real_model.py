@@ -1,7 +1,8 @@
 """Opt-in: the same contract against the real checkpoints.
 
 Skipped unless ARBITER_MODELS_DIR points at a downloaded `convaiinnovations/laya` tree, because it
-needs 2.4 GB of weights. Runs on CPU by default; set DEVICE=cuda to exercise the GPU path.
+needs 2.4 GB of weights. Runs on whatever ARBITER_DEVICE resolves to -- cuda, mps or cpu -- so the same suite
+covers the accelerator it is run on.
 """
 import os
 
@@ -26,7 +27,7 @@ STATE = "I was charged twice for the same subscription and nobody has replied to
 def checkpoint():
     from engines.laya.loader import Checkpoint
 
-    return Checkpoint("english", MODELS_DIR, device=os.environ.get("DEVICE", "cpu"), mode="eager")
+    return Checkpoint("english", MODELS_DIR, device=os.environ.get("ARBITER_DEVICE", "auto"), mode="eager")
 
 
 def test_one_forward_answers_every_question(checkpoint):
@@ -81,9 +82,11 @@ def test_the_largest_option_set_that_still_fits(checkpoint):
 
 def test_the_backend_answers_through_the_engine_interface():
     """The other end of the split: `LayaEngine` under the generic batcher, start to finish."""
-    from engines.laya.loader import LayaEngine
+    import torch
 
-    engine = LayaEngine(MODELS_DIR, names=("english",), device=os.environ.get("DEVICE", "cpu"),
+    from engines.laya.loader import LayaEngine, supported_dtypes
+
+    engine = LayaEngine(MODELS_DIR, names=("english",), device=os.environ.get("ARBITER_DEVICE", "auto"),
                         wait_ms=0)
     try:
         assert engine.checkpoints() == ["english"]
@@ -93,5 +96,8 @@ def test_the_backend_answers_through_the_engine_interface():
         assert out["answers"]["queue"]["choice"] in ("billing", "technical")
         assert out["input_tokens"] > 0
         assert out["batch_rows"] == 3
+        # What /readyz reports has to be what ran: the requested dtype collapses to fp32 on a
+        # device that cannot do it, and the label has to collapse with it.
+        assert engine.dtype_mode in supported_dtypes(torch.device(engine.device))
     finally:
         engine.close()

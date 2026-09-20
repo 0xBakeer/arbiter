@@ -101,8 +101,89 @@ a large and completely invisible tax.
 Even at the fine ladder, graphs only win where there is little work to amortise the padding
 over — one or five questions, one caller. See README.md for the resulting default.
 
-# Apple Silicon
+# Apple M2 Max, 32 GB
 
-Not measured yet. [recipes/apple](../recipes/apple/README.md) says what has to be settled first;
-the tables land here under this heading, in the same shape as the GB10 ones, so the two machines
-can be read side by side.
+Mac Studio, 32 GB unified memory, macOS 26.6.2, torch 2.14.0 from PyPI (the MPS arm64 wheel),
+CPython 3.13.13, 2026-09-20, nothing else on the GPU. `ARBITER_DEVICE=mps`, eager, fp32
+parameters. Setup notes: [recipes/apple](../recipes/apple/README.md).
+
+## Latency, one caller
+
+Same method as the GB10 section: 30 calls per row after 3 warm-up calls, English state,
+auto-routed to the English checkpoint, questions cycling through score / choice / noul.
+
+| questions in the call | mps + fp32 (shipped) | GB10, autocast | model card, T4 english |
+|---:|---:|---:|---:|
+| 1  | **30.3 ms** | 20.9 ms | 39.5 ms |
+| 5  | **63.1 ms** | 31.1 ms | — |
+| 10 | **107.4 ms** | 40.0 ms | 158.6 ms |
+| 50 | **462.3 ms** | 152.4 ms | 771 ms |
+
+p95 tracked p50 within 1.3 ms on every row.
+
+## Throughput, 4-question calls, 10 s per level
+
+| concurrency | questions/s | calls/s | p50 | p95 | errors |
+|---:|---:|---:|---:|---:|---:|
+| 1  | **71.9** | 18.0 | 54.8 ms | 55.5 ms | 0 |
+| 8  | **101.7** | 25.4 | 317.1 ms | 333.3 ms | 0 |
+| 32 | **105.9** | 26.5 | 1199.0 ms | 1289.8 ms | 0 |
+
+The ceiling arrives at eight callers and does not move after that; the extra concurrency turns
+into queueing, which is what the p50 column between 8 and 32 is showing.
+
+## Numerical equivalence
+
+The same 22 questions across 7 calls as the GB10 section. The reference is different and has to
+be said out loud: on CUDA it is `laya.Agent.system_one` in fp32 under `torch.autocast(bf16)`,
+which is what the SDK does there; on a Mac the SDK has no autocast path, so the reference is
+`laya.Agent.system_one` on **CPU in fp32** — the numerically cleanest thing available on the
+machine. Everything below is therefore "MPS against CPU", and the fp32 row is the size of that
+difference on its own.
+
+| checkpoint | path | questions | max abs delta p vs reference | argmax agreement |
+|---|---|---:|---:|---:|
+| english | fp32/eager | 8 | 0.00e+00 | 8/8 |
+| english | fp16/eager | 8 | 7.00e-04 | 8/8 |
+| english | bf16/eager | 8 | 1.23e-02 | 8/8 |
+| multilingual | fp32/eager | 9 | 1.00e-04 | 9/9 |
+| multilingual | fp16/eager | 9 | 1.26e-02 | 9/9 |
+| multilingual | bf16/eager | 9 | 6.06e-02 | 9/9 |
+| typed-decisions | fp32/eager | 5 | 0.00e+00 | 5/5 |
+| typed-decisions | fp16/eager | 5 | 1.80e-03 | 5/5 |
+| typed-decisions | bf16/eager | 5 | 1.35e-02 | 5/5 |
+
+Against the 5e-3 / 100%-argmax gate:
+
+- `fp32/eager` — max |Δp| **1.00e-04**, argmax unchanged. **Passes.** Two of the three
+  checkpoints are identical to the reference at four decimals; the third differs on one
+  question by the last digit a client can see. That is MPS's fp32 kernels not being
+  bit-identical to the CPU's, and it is the whole of the difference.
+- `fp16/eager` — max |Δp| 1.26e-02, argmax unchanged. **Fails.**
+- `bf16/eager` — max |Δp| 6.06e-02, argmax unchanged. **Fails**, by an order of magnitude.
+
+Both failures are worse than the GB10's rejected bf16 (2.11e-02) and for the same reason, more
+of it: there is no autocast on this lane keeping the norms, the residual stream and the
+accumulations in fp32, so the whole 22-28-layer encoder runs in the parameter dtype. Neither was
+benchmarked — a dtype outside the gate does not get a speed number here.
+
+Reproduce with `./run.sh equivalence --reference-device cpu`.
+
+## Cold load and footprint
+
+| | |
+|---|---|
+| `./run.sh serve` to `/readyz`, all three checkpoints | 88 s and 101 s, two runs |
+| first call at a shape the process has not run before | 207 ms (3 questions) to 1.24 s (5 questions, 507 tokens) |
+| the same calls once warm | 30-63 ms |
+| `footprint -p <pid>` at `/readyz` | 5,381 MB and 6,131 MB on the two runs |
+| of which `IOAccelerator (graphics)` | 4,922 MB both times — the weights |
+| `footprint -p <pid>` after a bench run | 6,465 MB; peak 6,767 MB |
+| `ps -o rss` | 1.6 GB shortly after `/readyz`, ~230 MB after a while |
+
+`ps -o rss` is the wrong tool on this machine and is quoted only to say so. It moved by a factor
+of seven on one unchanged server while the thing it was meant to measure did not move at all:
+the weights sit in IOAccelerator-backed unified-memory buffers that are outside the process's
+resident set. `footprint -p` counts them, and its `IOAccelerator (graphics)` line is stable at
+4,922 MB across restarts. There is no per-process GPU-memory figure to report separately the way
+`nvidia-smi` gives one on the GB10 — on unified memory there is no separate pool.

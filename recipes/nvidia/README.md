@@ -1,7 +1,7 @@
 # NVIDIA
 
-The lane every published figure was taken on: CUDA 13.0 wheels, `DEVICE=cuda`, eager forward
-with autocast bf16. `./run.sh setup` does all of it.
+CUDA 13.0 wheels, `ARBITER_DEVICE=cuda` (detected, not set), eager forward with autocast
+bf16. `./run.sh setup` does all of it.
 
 ## Install
 

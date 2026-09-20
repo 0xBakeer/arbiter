@@ -28,7 +28,7 @@ TimeoutStartSec=300
 
 Environment=PORT=8010
 Environment=HOST=0.0.0.0
-Environment=DEVICE=cuda
+Environment=ARBITER_DEVICE=cuda
 Environment=ARBITER_MODE=eager
 Environment=ARBITER_DTYPE=autocast
 Environment=ARBITER_MODELS=english,multilingual,typed-decisions

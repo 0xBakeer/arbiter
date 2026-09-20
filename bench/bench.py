@@ -41,14 +41,20 @@ def make_questions(n: int):
     return out
 
 
-def gpu_name() -> str:
-    try:
-        out = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                             capture_output=True, text=True, timeout=10)
-        name = out.stdout.strip().splitlines()[0].strip()
-        return name or "unknown GPU"
-    except Exception:
-        return "unknown GPU"
+def accelerator_name() -> str:
+    """What to label the run with. nvidia-smi on a CUDA box, the SoC name on a Mac."""
+    probes = [["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"]]
+    if sys.platform == "darwin":
+        probes = [["sysctl", "-n", "machdep.cpu.brand_string"]]
+    for probe in probes:
+        try:
+            out = subprocess.run(probe, capture_output=True, text=True, timeout=10)
+            name = out.stdout.strip().splitlines()[0].strip()
+            if name:
+                return name
+        except Exception:
+            pass
+    return "unknown GPU"
 
 
 def percentile(values, q):
@@ -160,14 +166,14 @@ def main():
         print("throughput  concurrency %2d  %6.1f questions/s  p50 %6.1f ms  p95 %6.1f ms  errors %d"
               % (c, res["questions_per_s"], res["p50_ms"], res["p95_ms"], res["errors"]))
 
-    gpu = gpu_name()
+    gpu = accelerator_name()
     payload = {"date": str(date.today()), "gpu": gpu, "mode": info.get("mode", args.label),
-               "dtype": info.get("dtype", "autocast"),
+               "dtype": info.get("dtype", "autocast"), "device": info.get("device"),
                "models": info.get("models"), "version": info.get("version"),
                "latency": rows, "throughput": conc}
 
-    md = ["", "## %s -- %s, `ARBITER_MODE=%s`, `ARBITER_DTYPE=%s`"
-          % (payload["date"], gpu, payload["mode"], payload["dtype"]), "",
+    md = ["", "## %s -- %s, `ARBITER_DEVICE=%s`, `ARBITER_MODE=%s`, `ARBITER_DTYPE=%s`"
+          % (payload["date"], gpu, payload["device"], payload["mode"], payload["dtype"]), "",
           "Checkpoints loaded: %s. Server version %s." % (", ".join(payload["models"] or []), payload["version"]),
           "", "### Latency, one caller, auto-routed English state", "",
           "| questions in the call | p50 | p95 | per question |", "|---:|---:|---:|---:|"]

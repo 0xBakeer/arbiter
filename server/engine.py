@@ -142,12 +142,13 @@ class Engine:
     Loading, the per-checkpoint worker thread, the queue cap, the warm-up and the shutdown are
     the same whatever the model is and live here.
 
-    `mode` and `dtype_mode` are what `/readyz` reports about how the checkpoints are running; a
-    backend that has no such distinction leaves them alone.
+    `mode`, `dtype_mode` and `device` are what `/readyz` reports about how the checkpoints are
+    running; a backend that has no such distinction leaves them alone.
     """
 
     mode = "eager"
     dtype_mode = "autocast"
+    device = "cpu"
 
     def __init__(self, names: Tuple[str, ...], max_batch: int = 64, wait_ms: float = 2.0,
                  max_queue: int = 256):

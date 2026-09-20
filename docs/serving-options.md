@@ -139,6 +139,6 @@ parameters already cost 2.1e-2 of probability error on this model. Quantisation 
 calibration that the model card itself calls the weakest thing about it. Bandwidth is not the
 constraint at 421M parameters either.
 
-**CPU serving.** Works — `DEVICE=cpu` takes the same code path with fp32 parameters and no
+**CPU serving.** Works — `ARBITER_DEVICE=cpu` takes the same code path with fp32 parameters and no
 graphs — and `tests/test_real_model.py` uses it. It is not the target, and it is roughly an order
 of magnitude slower.
