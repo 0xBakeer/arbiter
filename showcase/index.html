@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>arbiter plays</title>
+<meta name="description" content="Six small games where the Laya decision model picks every move from a text description of the board, in one forward pass, in tens of milliseconds.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_lib/theme.css">
+<style>
+  .tile img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; }
+  .tile .art { border-radius: 4px; }
+  .tile:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header class="top wrap">
+  <div class="brand"><span class="wordmark">arbiter plays</span></div>
+  <span class="spacer"></span>
+  <span class="status" id="status" data-mode="replay"><span class="dot"></span><span id="statusText">checking the server</span></span>
+</header>
+
+<section class="hero wrap">
+  <h1>The model picks the move.</h1>
+  <p>Six small games, one rule: every move comes from the Laya decision model, which reads a text description of the board and answers typed questions in one forward pass. No text is generated; the game reads the probabilities and moves. Tens of milliseconds per decision.</p>
+  <p class="links"><a href="/">Playground</a><a href="https://github.com/0xBakeer/arbiter#readme">README</a></p>
+</section>
+
+<main class="tiles wrap" id="tiles"></main>
+
+<footer class="foot wrap">
+  <span>Live when the arbiter server is running on this origin; each page falls back to a recorded run otherwise.</span>
+</footer>
+
+<script type="module">
+'use strict';
+const GAMES = [
+  { id: 'snake', name: 'Snake', text: 'A 12 by 12 board. One choice of four directions per tick, two nouls for dead-end risk and food reach, a shield that vetoes suicide.' },
+  { id: 'hopper', name: 'Hopper', text: 'Flappy-style. One noul per tick decides the flap, and there is no shield: the model flies the bird alone.' },
+  { id: 'crossing', name: 'Crossing', text: 'Frogger-style. Seven lanes of traffic, one choice of five moves, plus a three-level hit risk the shield reads.' },
+  { id: 'paddle', name: 'Paddle', text: 'Breakout paddle, the speed demo. The tick is as fast as the model answers.' },
+  { id: 'mines', name: 'Mines', text: 'Minesweeper safe-cell. Twelve nouls per call, one per candidate cell, answered in a single forward pass.' },
+  { id: 'dungeon', name: 'Dungeon', text: 'A text rogue-lite. Rooms, corridors and a monster or two, described in prose the model reads before each step.' },
+];
+const $tiles = document.getElementById('tiles');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+for (const g of GAMES) {
+  const a = document.createElement('a'); a.className = 'tile'; a.href = g.id + '/';
+  a.innerHTML = `<span class="art"><img src="_lib/posters/${g.id}.png" alt="" width="640" height="360"><canvas data-game="${g.id}" aria-hidden="true"></canvas></span>
+    <span class="row"><h2>${esc(g.name)}</h2><span class="rate" data-rate="${g.id}">&mdash;</span></span><p>${esc(g.text)}</p>`;
+  $tiles.appendChild(a);
+}
+
+/* measured decisions per second, when a game has been measured */
+for (const g of GAMES) {
+  fetch(`${g.id}/measurements.json`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(m => {
+    const v = pick(m); const el = document.querySelector(`[data-rate="${g.id}"]`);
+    if (v != null && el) { el.innerHTML = `<b>${(Math.round(v * 10) / 10).toFixed(1)}</b> decisions/s`; el.title = 'measured decisions per second, model policy'; }
+  }).catch(() => {});
+}
+function pick(m) {
+  if (!m || typeof m !== 'object') return null;
+  const direct = m.decisions_per_s ?? m.median_decisions_per_s ?? (m.stats && m.stats.decisions_per_s) ?? (m.model && m.model.decisions_per_s);
+  if (typeof direct === 'number') return direct;
+  const pols = m.policies || m;
+  for (const k of ['model+shield', 'model']) { const p = pols[k]; if (p && typeof p.decisions_per_s === 'number') return p.decisions_per_s; }
+  if (Array.isArray(m) && m.length) return pick(m[0]);
+  return null;
+}
+
+/* server status, same origin only */
+(async () => {
+  const st = document.getElementById('status'), tx = document.getElementById('statusText');
+  if (!location.protocol.startsWith('http')) { st.dataset.mode = 'replay'; tx.textContent = 'Recorded runs'; return; }
+  try {
+    const r = await fetch('/readyz', { cache: 'no-store' }); const j = await r.json();
+    if (r.ok && j.status === 'ready') { st.dataset.mode = 'live'; tx.innerHTML = `Live &middot; <b>${esc((j.models || []).length)} checkpoints</b>`; }
+    else { st.dataset.mode = 'replay'; tx.textContent = 'Server loading, recorded runs for now'; }
+  } catch (e) { st.dataset.mode = 'replay'; tx.textContent = 'Recorded runs'; }
+})();
+
+/* idle previews: one cobalt pulse per tile, travelling the poster's own path. One loop, ~30 fps,
+   paused off-screen and under prefers-reduced-motion. Coordinates are in the poster's 640x360 space. */
+const PATHS = {
+  snake: [[122, 252], [122, 108], [266, 108], [266, 216], [374, 216], [374, 72], [482, 72], [482, 180]],
+  hopper: Array.from({ length: 60 }, (_, i) => { const x = 40 + i * 10; return [x, 180 + 60 * Math.sin(x / 70)]; }),
+  crossing: [[320, 338], [320, 272], [250, 272], [250, 228], [330, 228], [330, 140], [280, 140], [280, 96], [340, 96], [340, 22]],
+  paddle: [[120, 320], [300, 150], [380, 320], [470, 190]],
+  mines: Array.from({ length: 25 }, (_, i) => { const a = i / 24 * Math.PI * 2; return [240 + 118 * Math.cos(a), 180 + 108 * Math.sin(a)]; }),
+  dungeon: [[90, 110], [200, 95], [260, 115], [340, 120], [420, 110], [470, 80], [540, 80]],
+};
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const tiles = [...document.querySelectorAll('canvas[data-game]')].map(c => ({ c, ctx: c.getContext('2d'), path: PATHS[c.dataset.game], t: Math.random(), visible: true, len: 0 }));
+for (const t of tiles) { const p = t.path; t.segs = p.slice(1).map((q, i) => Math.hypot(q[0] - p[i][0], q[1] - p[i][1])); t.len = t.segs.reduce((a, b) => a + b, 0); }
+const io = new IntersectionObserver(es => es.forEach(e => { const t = tiles.find(t => t.c === e.target); if (t) t.visible = e.isIntersecting; }));
+tiles.forEach(t => io.observe(t.c));
+function at(t, d) { const p = t.path; let i = 0; while (i < t.segs.length - 1 && d > t.segs[i]) { d -= t.segs[i]; i++; } const k = Math.min(1, d / t.segs[i]); return [p[i][0] + (p[i + 1][0] - p[i][0]) * k, p[i][1] + (p[i + 1][1] - p[i][1]) * k]; }
+let last = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (reduced || document.hidden || now - last < 33) return;
+  const dt = (now - last) / 1000; last = now;
+  for (const t of tiles) {
+    if (!t.visible) continue;
+    const r = t.c.getBoundingClientRect(); if (!r.width) continue;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const W = Math.round(r.width * dpr), H = Math.round(r.height * dpr);
+    if (t.c.width !== W || t.c.height !== H) { t.c.width = W; t.c.height = H; }
+    const s = W / 640; const ctx = t.ctx; ctx.clearRect(0, 0, W, H);
+    t.t = (t.t + dt / 6) % 1;
+    for (let k = 0; k < 6; k++) {                      // a short comet: six dots trailing the pulse
+      const d = ((t.t - k * 0.012 + 1) % 1) * t.len; const [x, y] = at(t, d);
+      ctx.globalAlpha = 1 - k / 6; ctx.fillStyle = k ? '#5583FF' : '#E9EDF7';
+      ctx.shadowColor = 'rgba(85,131,255,.8)'; ctx.shadowBlur = k ? 0 : 10 * s;
+      ctx.beginPath(); ctx.arc(x * s, y * s, (k ? 3 : 4.5) * s, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  }
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

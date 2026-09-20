@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>arbiter plays snake</title>
+<meta name="description" content="The Laya decision model plays Snake: one forward pass per move, calibrated probabilities per direction, in tens of milliseconds.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_lib/theme.css">
+</head>
+<body>
+<header class="top wrap">
+  <div class="brand"><a href="../"><span class="wordmark">arbiter plays</span></a><span class="sub">snake</span></div>
+  <span class="spacer"></span>
+  <a class="back" href="../">All games</a>
+</header>
+
+<main class="game wrap">
+  <section class="board" aria-label="Board">
+    <div class="stage" id="stage">
+      <canvas id="board" aria-label="Snake board"></canvas>
+      <div class="hud" aria-live="off">
+        <div class="corner l">
+          <div class="stat big"><b id="hudScore">0</b><span>score</span></div>
+          <div class="stat"><b id="hudLength">0</b><span>length</span></div>
+        </div>
+        <div class="corner r">
+          <div class="stat best" id="hudBestStat"><b id="hudBest">0</b><span>best</span></div>
+          <div class="ep" title="Episode progress"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="fg" id="ring" cx="18" cy="18" r="15"/></svg><small id="stepText">0 / 0</small></div>
+        </div>
+      </div>
+      <div class="overlay" id="overlay"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p></div></div>
+    </div>
+  </section>
+  <aside id="panel" aria-label="What the model answered"></aside>
+</main>
+
+<footer class="keys wrap">
+  <span class="chip" id="status" data-mode="down" aria-live="polite"><span class="dot"></span><span id="statusText">looking for the server</span></span>
+  <button data-key="pause"><kbd>Space</kbd> pause</button>
+  <button data-key="slower"><kbd>&darr;</kbd> slower</button>
+  <button data-key="faster"><kbd>&uarr;</kbd> faster</button>
+  <button data-key="reset"><kbd>R</kbd> reset</button>
+  <button data-key="policy" aria-pressed="true"><kbd>M</kbd> <span id="policyText">model</span></button>
+  <button data-key="shield" aria-pressed="true"><kbd>S</kbd> shield</button>
+  <button data-key="back"><kbd>Q</kbd> all games</button>
+  <span class="chip speed" id="badge" title="Speed">1&times;</span>
+</footer>
+
+<script>
+/* Opened from disk in a browser that refuses module scripts on file:// (Chrome): say so, with the fix. */
+if (location.protocol === 'file:') setTimeout(function () {
+  if (window.__arbiterPlays) return;
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('ovTitle').textContent = 'This browser will not run the page from disk';
+  document.getElementById('ovText').innerHTML = 'Chrome blocks module scripts on file:// pages. Serve the folder instead: <b>python3 -m http.server</b> in the repo root, then open <b>/showcase/snake/</b>. Safari and Firefox open this file directly and play the recorded run.';
+  document.getElementById('statusText').textContent = 'Not running';
+}, 1200);
+</script>
+<script type="module">
+'use strict';
+import { mountPanel } from '../_lib/panel.js';
+import { drawDecisionHalo, drawBoardDepth, drawDangerVignette, createParticles, createShake, countUp, ringProgress, COLORS } from '../_lib/board.js';
+window.__arbiterPlays = true;
+
+/* =====================================================================================
+   GENERIC PART — every game page keeps this as is: server probe, live/replay runner with
+   sub-tick timing (the model is asked for the NEXT move while the current one animates),
+   keys, HUD, pulse, panel wiring. The block marked SNAKE at the bottom (drawing + the
+   three hooks onEpisodeStart / onApplied / onNextDecision) changes per game.
+   ===================================================================================== */
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const fromDisk = location.protocol === 'file:';
+const BASE = (params.get('base') || (fromDisk ? 'http://localhost:8010' : location.origin)).replace(/\/+$/, '');
+const SPEEDS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+const REPLAY_URL = '../replay/snake.json';
+const BEST_KEY = 'arbiter.plays.snake.best';
+
+let logic, createClient;
+try {
+  const m = await import('./logic.mjs'); logic = m.default || m;
+  ({ createClient } = await import('../_lib/client.mjs'));
+} catch (e) {
+  overlay(true, 'The game modules did not load', esc(String(e.message || e)));
+  throw e;
+}
+const meta = logic.meta || {};
+const TICK_MS = meta.tick_ms || 160;
+const MAX_STEPS = meta.max_steps || 400;
+
+/* ---- page chrome ---- */
+const panel = mountPanel($('panel'), { meta, questions: logic.questions(logic.init(1)), strip: false });
+const canvas = $('board'), ctx = canvas.getContext('2d');
+let dpr = 1, W = 0, H = 0;
+new ResizeObserver(() => {
+  const r = canvas.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  W = Math.round(r.width * dpr); H = Math.round(r.height * dpr); canvas.width = W; canvas.height = H;
+}).observe(canvas);
+
+function overlay(show, title, text) {
+  $('overlay').classList.toggle('show', !!show);
+  if (title != null) $('ovTitle').textContent = title;
+  if (text != null) $('ovText').innerHTML = text;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---- run state ---- */
+const run = {
+  mode: 'down',            // live | replay | down
+  policy: 'model',         // model | heuristic
+  shield: true,
+  speedIx: 2,
+  paused: false,
+  engine: '—',
+  connected: false,
+  client: null,
+  log: null,               // the recorded run when mode === replay
+  seedCount: 0,
+};
+const ep = { state: null, prev: null, tickStart: 0, pending: null, result: null, dead: false, deadAt: 0, headHot: 0, i: 0, bornAt: 0 };
+const counters = { decisions: 0, interventions: 0, tokens: 0 };
+const roundtrips = [];     // the last 20 round trips: decisions per second = what the model could sustain
+let best = +(localStorage.getItem(BEST_KEY) || 0);
+$('hudBest').textContent = String(best);
+
+const speed = () => SPEEDS[run.speedIx];
+const tickDur = () => TICK_MS / speed();
+
+function paintStatus() {
+  const st = $('status');
+  st.dataset.mode = run.mode === 'live' && !run.connected ? 'down' : run.mode;
+  if (run.mode === 'live') $('statusText').innerHTML = run.connected ? `Live &middot; <b>${esc(run.engine)}</b>` : 'Live &middot; server not answering, playing the heuristic';
+  else if (run.mode === 'replay') $('statusText').innerHTML = `Recorded run &middot; <b>${esc(run.engine)}</b>`;
+  else $('statusText').textContent = 'No server and no recording';
+  $('badge').textContent = speed() + '×';
+  $('policyText').textContent = run.policy;
+  const pol = document.querySelector('[data-key="policy"]'), sh = document.querySelector('[data-key="shield"]');
+  pol.setAttribute('aria-pressed', String(run.policy === 'model')); sh.setAttribute('aria-pressed', String(run.shield));
+  pol.disabled = sh.disabled = run.mode === 'replay';
+  pol.title = sh.title = run.mode === 'replay' ? 'Not available in a recorded run' : '';
+  panel.setStatus({ mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield });
+}
+
+/* ---- the cobalt pulse: actor -> panel on every model call ---- */
+let pulses = 0;
+function firePulse() {
+  if (pulses >= 4 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const from = actorPixel(ep.state); if (!from) return;
+  const cr = canvas.getBoundingClientRect();
+  const target = document.querySelector('#panel .sec') || $('panel');
+  const tr = target.getBoundingClientRect();
+  const x0 = cr.left + from[0], y0 = cr.top + from[1];
+  const x1 = tr.left + 6, y1 = tr.top + 8;
+  const p = document.createElement('i'); p.className = 'pulse'; document.body.appendChild(p); pulses++;
+  const anim = p.animate([
+    { transform: `translate(${x0}px, ${y0}px) scale(.6)`, opacity: 0 },
+    { transform: `translate(${x0}px, ${y0}px) scale(1)`, opacity: 1, offset: .12 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1)`, opacity: .9, offset: .92 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1.6)`, opacity: 0 },
+  ], { duration: Math.min(420, Math.max(220, tickDur() * .9)), easing: 'cubic-bezier(.3,.6,.2,1)' });
+  anim.onfinish = () => { p.remove(); pulses--; panel.flash(); };
+}
+
+/* ---- asking for the next move ---- */
+async function askLive(state) {
+  const qs = logic.questions(state);
+  firePulse();
+  let res = null, err = null;
+  try { res = await run.client.ask(logic.encode(state), qs); }
+  catch (e) { err = e; }
+  const modelDecision = res ? logic.decide(state, res.answers) : null;
+  const heuristicAction = logic.heuristic(state);
+  const decision = run.policy === 'model' && modelDecision
+    ? modelDecision
+    : { action: heuristicAction, extras: { ...(modelDecision && modelDecision.extras), model_action: modelDecision ? modelDecision.action : null } };
+  if (res) {
+    const engine = res.routing && res.routing.model ? 'laya-' + res.routing.model : (res.model || run.engine);
+    if (!run.connected || engine !== run.engine) { run.connected = true; run.engine = engine; paintStatus(); }
+  } else if (run.connected) { run.connected = false; paintStatus(); }
+  if (res) { roundtrips.push(res.roundtrip_ms); if (roundtrips.length > 20) roundtrips.shift(); }
+  const dps = roundtrips.length ? roundtrips.length * 1000 / roundtrips.reduce((a, b) => a + b, 0) : null;
+  return {
+    qs, answers: res ? res.answers : null, decision,
+    timing: res ? { inference_ms: res.inference_ms != null ? res.inference_ms : res.latency_ms, roundtrip_ms: res.roundtrip_ms, decisions_per_s: dps } : {},
+    tokens: res && res.usage ? (res.usage.output_tokens || 0) : 0, error: err,
+  };
+}
+// A recorded tick (see _lib/recorder.mjs): { action, model_action, intervened, reason, extras, answers, timing, ... }.
+// The board is rebuilt from the seed with logic.step, exactly like a live run.
+function askReplay(state) {
+  const t = run.log.ticks[ep.i];
+  if (!t) return Promise.resolve(null);
+  const modelAction = t.model_action != null ? t.model_action : t.action;
+  return Promise.resolve({
+    qs: logic.questions(state), answers: t.answers || null,
+    decision: { action: modelAction, extras: t.extras || {} },
+    recordedShield: { intervened: !!t.intervened, reason: t.reason || '', action: t.action },
+    recordedAction: t.action, timing: t.timing || {}, tokens: (t.usage && t.usage.output_tokens) || 0,
+  });
+}
+const ask = state => run.mode === 'replay' ? askReplay(state) : askLive(state);
+function requestNext(state) { ep.pending = ask(state).then(r => { ep.result = r; if (r) onNextDecision(r); }); }
+
+/* ---- applying a decision = one tick ---- */
+function apply(res, now) {
+  const s = ep.state;
+  let action = res.decision.action, sh = { intervened: false, reason: '', action };
+  if (run.mode === 'replay') { sh = res.recordedShield; action = res.recordedAction; }
+  else if (run.shield) { sh = logic.shield(s, action, res.decision.extras || {}); action = sh.action; }
+  const out = logic.step(s, action);
+  ep.prev = s; ep.state = out.state; ep.tickStart = now; ep.headHot = 1; ep.i++;
+  counters.decisions++; if (sh.intervened) counters.interventions++; counters.tokens += res.tokens || 0;
+  panel.update({
+    questions: res.qs, answers: res.answers || {}, decision: res.decision, shield: sh,
+    timing: res.timing, counters: { ...counters },
+    status: { mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield },
+  });
+  onApplied(res, out, sh, action, now);
+  paintHud();
+  if (out.done || (run.mode === 'replay' && ep.i >= run.log.ticks.length)) {
+    ep.dead = true; ep.deadAt = now; ep.pending = null; ep.result = null;
+    return;
+  }
+  requestNext(ep.state);
+}
+
+function paintHud() {
+  const sum = logic.summary(ep.state);
+  countUp($('hudScore'), sum.score);
+  countUp($('hudLength'), sum.length != null ? sum.length : 0, { pop: false });
+  if (sum.score > best) { best = sum.score; localStorage.setItem(BEST_KEY, String(best)); countUp($('hudBest'), best); $('hudBestStat').classList.add('hot'); }
+  const total = run.mode === 'replay' ? run.log.ticks.length : MAX_STEPS;
+  const at = run.mode === 'replay' ? ep.i : sum.steps;
+  $('stepText').textContent = `${at} / ${total}`;
+  ringProgress($('ring'), at / total);
+}
+
+function startEpisode(now) {
+  const seed = run.mode === 'replay' ? (run.log.seed != null ? run.log.seed : 1) : ((Date.now() + run.seedCount++) % 1e6) + 1;
+  ep.state = logic.init(seed);
+  ep.prev = ep.state; ep.tickStart = now; ep.dead = false; ep.i = 0; ep.headHot = 0; ep.result = null; ep.bornAt = now;
+  $('hudBestStat').classList.remove('hot');
+  const st = $('stage'); st.classList.remove('born'); void st.offsetWidth; st.classList.add('born');
+  onEpisodeStart(ep.state, now);
+  paintHud();
+  requestNext(ep.state);
+}
+
+/* ---- the frame loop with sub-tick timing ---- */
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!ep.state) return;
+  const dt = now - last; last = now;
+  if (ep.dead) {
+    render(ep.state, ep.state, 1, { dead: true, deadT: (now - ep.deadAt) / 1000, paused: run.paused, dt, now });
+    if (!run.paused && now - ep.deadAt > 1500) { panel.reset(); startEpisode(now); }
+    return;
+  }
+  if (run.paused) { render(ep.prev, ep.state, 1, { paused: true, dt: 0, now }); return; }
+  let t = (now - ep.tickStart) / tickDur();
+  if (t >= 1) {
+    if (ep.result) { const r = ep.result; ep.result = null; apply(r, now); t = 0; }
+    else if (ep.pending === null && run.mode === 'replay') { ep.dead = true; ep.deadAt = now; }
+    else t = 1;                                   // the answer is still in flight: hold at the end of the glide
+  }
+  ep.headHot = Math.max(0, ep.headHot - dt / 320);
+  render(ep.prev, ep.state, t, { headHot: ep.headHot, dt, now });
+}
+
+/* ---- keys ---- */
+const actions = {
+  pause() { run.paused = !run.paused; overlay(run.paused, 'Paused', 'Press <kbd>Space</kbd> to continue'); if (!run.paused) { ep.tickStart = performance.now(); if (ep.dead) ep.deadAt = performance.now(); } },
+  faster() { run.speedIx = Math.min(SPEEDS.length - 1, run.speedIx + 1); paintStatus(); },
+  slower() { run.speedIx = Math.max(0, run.speedIx - 1); paintStatus(); },
+  reset() { counters.decisions = counters.interventions = counters.tokens = 0; roundtrips.length = 0; panel.reset(); startEpisode(performance.now()); if (run.paused) actions.pause(); },
+  policy() { if (run.mode === 'replay') return; run.policy = run.policy === 'model' ? 'heuristic' : 'model'; paintStatus(); },
+  shield() { if (run.mode === 'replay') return; run.shield = !run.shield; paintStatus(); },
+  back() { location.href = '../'; },
+};
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = { ' ': 'pause', ArrowUp: 'faster', ArrowDown: 'slower', r: 'reset', R: 'reset', m: 'policy', M: 'policy', s: 'shield', S: 'shield', q: 'back', Q: 'back' }[e.key];
+  if (!k) return; e.preventDefault(); actions[k]();
+});
+document.querySelectorAll('footer.keys button').forEach(b => b.addEventListener('click', () => actions[b.dataset.key]()));
+
+/* ---- boot: live if the server answers, otherwise the recorded run ---- */
+async function boot() {
+  let ready = false;
+  if (!(params.get('mode') === 'replay')) {
+    try {
+      const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 2500);
+      const r = await fetch(BASE + '/readyz', { cache: 'no-store', signal: ctrl.signal }); clearTimeout(to);
+      const j = await r.json().catch(() => ({}));
+      ready = r.ok && j.status === 'ready';
+    } catch (e) { ready = false; }
+  }
+  if (ready) {
+    run.mode = 'live'; run.connected = true;
+    run.client = createClient({ baseUrl: BASE, model: params.get('model') || 'auto' });
+  } else {
+    try {
+      const r = await fetch(REPLAY_URL, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      run.log = await r.json();
+      if (!Array.isArray(run.log.ticks) || !run.log.ticks.length) throw new Error('empty recording');
+      run.mode = 'replay'; run.engine = run.log.engine || run.log.model || 'recorded';
+    } catch (e) {
+      run.mode = 'down';
+      overlay(true, 'Nothing to play', `No arbiter server at <b>${esc(BASE)}</b> and no recording at <b>${esc(REPLAY_URL)}</b>. Start the server (<b>./run.sh</b>) and reload, or add <b>?base=http://localhost:8010</b> to the URL.`);
+      paintStatus(); return;
+    }
+  }
+  paintStatus();
+  startEpisode(performance.now());
+  requestAnimationFrame(frame);
+  if (run.mode === 'live') setInterval(async () => {
+    try { const r = await fetch(BASE + '/readyz', { cache: 'no-store' }); const j = await r.json(); const ok = r.ok && j.status === 'ready'; if (ok !== run.connected) { run.connected = ok; paintStatus(); } }
+    catch (e) { if (run.connected) { run.connected = false; paintStatus(); } }
+  }, 10000);
+}
+
+/* =====================================================================================
+   SNAKE — the game-specific part of the page.
+     actorPixel(state)                      where the pulse starts, in CSS px on the canvas
+     onEpisodeStart(state, now)             reset the visual effects
+     onApplied(res, out, shield, action)    a decision was played: trail, particles, halo, shake
+     onNextDecision(res)                    the model's answer for the NEXT move arrived: the eyes turn
+     render(prev, cur, t, fx)               every frame, t in [0,1] = progress of the glide prev -> cur
+   ===================================================================================== */
+const DIRV = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+const vis = {
+  particles: createParticles(), shake: createShake(),
+  trail: [],                 // cells the tail left: {x, y, tick}
+  halo: null,                // {probs, chosen, vetoed} for the move being played
+  look: 'right',             // where the eyes look: the next decision when it has arrived
+  eatAt: -1e9, bornAt: 0, lastTongue: 0,
+};
+const xy = p => Array.isArray(p) ? p : [p.x, p.y];
+// the arena sits below a band that belongs to the HUD, so the score never covers the top row
+const cellGeom = () => { const n = ep.state ? ep.state.w : 12; const side = Math.round(14 * dpr), top = Math.round(60 * dpr); const c = Math.min(W - side * 2, H - top - side) / n; return { n, pad: side, padX: (W - n * c) / 2, padY: top, c }; };
+const lerp = (a, b, t) => a + (b - a) * t;
+
+function actorPixel(state) {
+  if (!state || !W) return null;
+  const { padX, padY, c } = cellGeom(); const [x, y] = xy(state.snake[0]);
+  return [(padX + (x + .5) * c) / dpr, (padY + (y + .5) * c) / dpr];
+}
+function onEpisodeStart(state, now) {
+  vis.trail.length = 0; vis.halo = null; vis.look = state.dir; vis.eatAt = -1e9; vis.bornAt = now;
+}
+function onApplied(res, out, sh, action, now) {
+  const probs = res.answers && res.answers.move ? res.answers.move.probabilities : null;
+  vis.halo = probs ? { probs, chosen: action, vetoed: sh.intervened ? res.decision.action : null, at: now } : null;
+  vis.look = action;
+  const prevTail = ep.prev.snake[ep.prev.snake.length - 1];
+  const grew = out.state.snake.length > ep.prev.snake.length;
+  if (!grew && prevTail) { const [x, y] = xy(prevTail); vis.trail.push({ x, y, tick: ep.i }); if (vis.trail.length > 20) vis.trail.shift(); }
+  if ((out.events || []).some(e => /ate/.test(e))) {
+    vis.eatAt = now;
+    const { padX, padY, c } = cellGeom(); const [fx, fy] = xy(ep.prev.food);
+    vis.particles.burst(padX + (fx + .5) * c, padY + (fy + .5) * c, { count: 18, speed: c * 3.2, size: c * .07, life: .6 });
+  }
+  if (out.done && !out.state.alive) vis.shake.kick(1);
+}
+function onNextDecision(res) { if (res && res.decision && DIRV[res.decision.action]) vis.look = res.decision.action; }
+
+function render(prev, cur, t, fx = {}) {
+  if (!W) return;
+  const now = fx.now || performance.now(), dt = (fx.dt || 0) / 1000;
+  const { n, padX, padY, c } = cellGeom();
+  const px = (x, y) => [padX + (x + .5) * c, padY + (y + .5) * c];
+  const dead = !!fx.dead && !cur.alive, deadT = fx.deadT || 0;
+  const born = Math.min(1, (now - vis.bornAt) / 450);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const [sx, sy] = vis.shake.offset(dt);
+  ctx.translate(sx * dpr, sy * dpr);
+  drawBoardDepth(ctx, W, H, { cell: c, padX, padY, n, dpr, glow: dead ? 0 : .45 });
+
+  // the trail: the last cells the tail left, fading with age
+  for (const cell of vis.trail) {
+    const age = ep.i - cell.tick; if (age > 20) continue;
+    const k = 1 - age / 20; const a = .34 * k * born; const [x, y] = px(cell.x, cell.y); const s = c * (.03 + .11 * k);
+    ctx.fillStyle = `rgba(125,160,255,${a.toFixed(3)})`; ctx.beginPath(); ctx.arc(x, y, s, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // food: pulses and bobs, the one orange thing on the board
+  if (cur.food && !dead) {
+    const [fx0, fy0] = px(...xy(cur.food)); const bob = Math.sin(now / 340) * c * .06; const pulse = 1 + .09 * Math.sin(now / 240);
+    const r = c * .21 * pulse;
+    ctx.save(); ctx.globalAlpha = born; ctx.shadowColor = 'rgba(255,140,51,.75)'; ctx.shadowBlur = 14 * dpr; ctx.fillStyle = COLORS.orange;
+    ctx.beginPath(); ctx.roundRect(fx0 - r, fy0 + bob - r, r * 2, r * 2, r * .4); ctx.fill();
+    ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(255,140,51,.25)'; ctx.lineWidth = dpr;
+    ctx.beginPath(); ctx.arc(fx0, fy0 + bob, c * .38 + c * .04 * Math.sin(now / 240 + 1), 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  }
+
+  // body: every segment glides from where it was to where it is; corners are rounded through midpoints
+  const pts = cur.snake.map((cell, i) => { const [x, y] = xy(cell); const p = xy(prev.snake[Math.min(i, prev.snake.length - 1)]); return px(lerp(p[0], x, t), lerp(p[1], y, t)); });
+  const bodyW = c * .58; const bodyColor = dead ? COLORS.danger : COLORS.cobalt;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (dead) {
+    // segments fade tail first
+    for (let i = pts.length - 1; i >= 1; i--) {
+      const a = Math.max(0, Math.min(1, 1 - (deadT - (pts.length - 1 - i) * .045) / .8));
+      if (a <= 0) continue;
+      ctx.globalAlpha = a * .85; ctx.strokeStyle = bodyColor; ctx.lineWidth = bodyW;
+      ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i - 1][0], pts[i - 1][1]); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  } else if (pts.length > 1) {
+    ctx.globalAlpha = .88 * born; ctx.strokeStyle = bodyColor; ctx.lineWidth = bodyW;
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length - 1; i++) { const m = [(pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2]; ctx.quadraticCurveTo(pts[i][0], pts[i][1], m[0], m[1]); }
+    ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]); ctx.stroke();
+    // segment joints
+    ctx.fillStyle = `rgba(233,237,247,${(.16 * born).toFixed(3)})`;
+    for (let i = 1; i < pts.length; i++) { ctx.beginPath(); ctx.arc(pts[i][0], pts[i][1], c * .12, 0, Math.PI * 2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+  }
+
+  // the decision halo around the head: the model's probabilities as wedges
+  const [hx, hy] = pts[0];
+  if (vis.halo && !dead) {
+    const veto = vis.halo.vetoed ? .5 + .5 * Math.sin(now / 55) : 0;
+    drawDecisionHalo(ctx, { x: hx, y: hy }, vis.halo.probs, vis.halo.chosen, vis.halo.vetoed, { inner: c * .52, reach: c * .95, flash: veto, alpha: born });
+  }
+
+  // head: brightens on each decision, pops when it eats, eyes look where the next move goes
+  const sinceEat = (now - vis.eatAt) / 1000; const eatPop = sinceEat < .3 ? 1 + .32 * (1 - sinceEat / .3) : 1;
+  const hot = fx.headHot || 0; const hs = c * .37 * eatPop;
+  const deadA = dead ? Math.max(0, 1 - Math.max(0, deadT - .6) / .6) : 1;
+  ctx.save(); ctx.globalAlpha = deadA * born;
+  if (hot > 0 && !dead) { ctx.shadowColor = `rgba(125,160,255,${(hot * .9).toFixed(2)})`; ctx.shadowBlur = 18 * dpr * hot; }
+  ctx.fillStyle = dead ? COLORS.danger : mix(COLORS.cobaltText, COLORS.ink, hot);
+  ctx.beginPath(); ctx.roundRect(hx - hs, hy - hs, hs * 2, hs * 2, hs * .45); ctx.fill(); ctx.shadowBlur = 0;
+  const look = DIRV[vis.look] || DIRV[cur.dir] || [1, 0]; const side = [-look[1], look[0]];
+  const er = c * .07, fwd = c * .16, lat = c * .17;
+  ctx.fillStyle = '#0A0F1E';
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(hx + look[0] * fwd + side[0] * lat * s, hy + look[1] * fwd + side[1] * lat * s, er, 0, Math.PI * 2); ctx.fill(); }
+  if (dead) { // x eyes
+    ctx.strokeStyle = '#0A0F1E'; ctx.lineWidth = 1.5 * dpr;
+    for (const s of [-1, 1]) { const ex = hx + look[0] * fwd + side[0] * lat * s, ey = hy + look[1] * fwd + side[1] * lat * s; ctx.beginPath(); ctx.moveTo(ex - er, ey - er); ctx.lineTo(ex + er, ey + er); ctx.moveTo(ex + er, ey - er); ctx.lineTo(ex - er, ey + er); ctx.stroke(); }
+  }
+  // tongue: flicks when the food is close ahead
+  if (!dead && cur.food) {
+    const [fx1, fy1] = xy(cur.food), [hx1, hy1] = xy(cur.snake[0]); const d = Math.abs(fx1 - hx1) + Math.abs(fy1 - hy1);
+    const flick = d <= 3 && (now % 700) < 170;
+    if (flick) {
+      const dir = DIRV[cur.dir] || [1, 0]; const s2 = [-dir[1], dir[0]]; const tx = hx + dir[0] * hs, ty = hy + dir[1] * hs; const L = c * .22;
+      ctx.strokeStyle = COLORS.danger; ctx.lineWidth = 1.6 * dpr; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + dir[0] * L * .55, ty + dir[1] * L * .55);
+      ctx.lineTo(tx + dir[0] * L + s2[0] * L * .3, ty + dir[1] * L + s2[1] * L * .3); ctx.moveTo(tx + dir[0] * L * .55, ty + dir[1] * L * .55);
+      ctx.lineTo(tx + dir[0] * L - s2[0] * L * .3, ty + dir[1] * L - s2[1] * L * .3); ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // particles from the last meal
+  vis.particles.step(dt); vis.particles.draw(ctx, 1);
+
+  // death: red vignette flash; pause: dim
+  if (dead) drawDangerVignette(ctx, W, H, Math.max(0, 1 - deadT / .55));
+  if (fx.paused) { ctx.fillStyle = 'rgba(10,15,30,.45)'; ctx.fillRect(-20 * dpr, -20 * dpr, W + 40 * dpr, H + 40 * dpr); }
+}
+function mix(a, b, t) {
+  const p = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const [r1, g1, b1] = p(a), [r2, g2, b2] = p(b);
+  return `rgb(${Math.round(lerp(r1, r2, t))},${Math.round(lerp(g1, g2, t))},${Math.round(lerp(b1, b2, t))})`;
+}
+
+boot();
+</script>
+</body>
+</html>
