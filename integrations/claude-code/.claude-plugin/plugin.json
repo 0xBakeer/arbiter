@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "laya-decisions",
+  "displayName": "Laya Decisions",
+  "version": "0.1.0",
+  "description": "Fast typed decisions from a self-hosted Laya System One server: classify, score, check, and a PreToolUse guard on Bash.",
+  "license": "Apache-2.0",
+  "keywords": ["laya", "jev", "system-one", "classification", "guardrails", "safety"]
+}
