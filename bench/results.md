@@ -19,7 +19,12 @@ DGX Spark class, 128 GB unified memory, driver 580, CUDA 13.0, torch 2.14.0+cu13
 with an unrelated LLM already resident on the same GPU. Setup notes:
 [recipes/nvidia](../recipes/nvidia/README.md).
 
-## Latency, one caller
+That LLM is the reason every table below carries a label. **LLM idle** means it was resident but
+not decoding — the card was ours. **Next to a busy LLM (92 % GPU utilisation)** means it was
+serving at full tilt while the same bench ran. Both were taken on 2026-09-20 on the same box and
+the same server build; the difference between them is contention, nothing else.
+
+## Latency, one caller — LLM idle
 
 30 calls per row after 3 warm-up calls, English state, auto-routed to the English checkpoint.
 Questions cycle through score / choice / noul so every count mixes all three types.
@@ -33,7 +38,27 @@ Questions cycle through score / choice / noul so every count mixes all three typ
 
 p95 tracked p50 within 2 ms on every row.
 
-## Throughput, 4-question calls, 10 s per level
+The shipped column was re-measured later the same day, on a restarted server, and reproduced
+within noise: 20.6 / 31.7 / 40.7 / 157.1 ms. Those rows are not repeated as a second table
+because they say the same thing.
+
+## Latency, one caller — next to a busy LLM (92 % GPU utilisation)
+
+Same method, same shipped settings (eager + autocast), with the LLM decoding throughout.
+
+| questions in the call | p50 | p95 | per question |
+|---:|---:|---:|---:|
+| 1  | **326.6 ms** | 350.0 ms | 326.63 ms |
+| 5  | **278.6 ms** | 343.3 ms | 55.72 ms |
+| 10 | **258.1 ms** | 352.0 ms | 25.81 ms |
+| 50 | **381.6 ms** | 424.5 ms | 7.63 ms |
+
+Ten to sixteen times the idle latency at the small counts, and 2.5× at fifty. The shape is worth
+reading: the p50 barely moves between one and ten questions, because what is being waited on is
+not our forward but a slot on a card the LLM is holding. The per-question column therefore still
+falls the way it does when idle — once the slot arrives, the batch is as cheap as ever.
+
+## Throughput, 4-question calls, 10 s per level — LLM idle
 
 | concurrency | eager + autocast (shipped) | graphs + autocast | eager + bf16 params (rejected) |
 |---:|---:|---:|---:|
@@ -41,7 +66,20 @@ p95 tracked p50 within 2 ms on every row.
 | 8  | **286.6 q/s** | 247.6 q/s | 380.5 q/s |
 | 32 | **301.0 q/s** | 266.2 q/s | 351.4 q/s |
 
-No errors at any level in any mode.
+No errors at any level in any mode. The re-run on the restarted server gave 134.9 / 285.8 /
+295.4 q/s in the shipped column, again within noise.
+
+## Throughput, 4-question calls, 10 s per level — next to a busy LLM (92 % GPU utilisation)
+
+| concurrency | questions/s | calls/s | p50 | p95 | errors |
+|---:|---:|---:|---:|---:|---:|
+| 1  | **23.2** | 5.8 | 183.1 ms | 274.7 ms | 0 |
+| 8  | **87.5** | 21.9 | 365.8 ms | 399.5 ms | 0 |
+| 32 | **152.6** | 38.2 | 829.4 ms | 978.4 ms | 0 |
+
+Roughly half the idle throughput at concurrency 8 and 32, and a fifth of it at one caller, with
+no errors at any level. Contention costs latency first and throughput second: batching still
+works, there are just fewer slots to batch into.
 
 ## Numerical equivalence
 

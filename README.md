@@ -20,9 +20,9 @@ automatic routing between them, and whatever is trained here next behind the sam
 ([engines/README.md](engines/README.md)). So is the machine: one recipe per accelerator under
 [recipes/](recipes), NVIDIA and Apple Silicon both measured.
 
-On one GB10 it answers a single question in **20.9 ms** and fifty questions in one call in
-**152 ms**, measured end-to-end over HTTP; on an M2 Max Mac the same calls take **30.3 ms** and
-**462 ms**. Realistic states — a support ticket, an email, a diff — carry more tokens and more
+On one GB10 with the card to itself it answers a single question in **20.9 ms** and fifty
+questions in one call in **152 ms**, measured end-to-end over HTTP; on an M2 Max Mac the same
+calls take **30.3 ms** and **462 ms**. Realistic states — a support ticket, an email, a diff — carry more tokens and more
 questions, and land in the **tens of milliseconds**; the captured runs are in
 [docs/use-cases.md](docs/use-cases.md). It uses about 5 GB of GPU memory, which is little enough
 to sit next to a large language model on the same card.
@@ -203,17 +203,17 @@ Questions cycling through all three types, measured end-to-end over HTTP, on eac
 shipped defaults — a GB10 in autocast bf16, an M2 Max in fp32. Full method and the rest of the
 figures in [bench/results.md](bench/results.md).
 
-| questions in one call | GB10 | Apple M2 Max | model card, T4 english | model card, T4 multilingual |
-|---:|---:|---:|---:|---:|
-| 1  | **20.9 ms** | **30.3 ms** | 39.5 ms | 32.8 ms |
-| 5  | **31.1 ms** | **63.1 ms** | — | — |
-| 10 | **40.0 ms** | **107.4 ms** | 158.6 ms | 72.3 ms |
-| 50 | **152.4 ms** | **462.3 ms** | 771 ms | 337 ms |
+| | 1 question | 5 | 10 | 50 | throughput, 4-question calls, 1 / 8 / 32 callers |
+|---|---:|---:|---:|---:|---:|
+| GB10, LLM idle | **20.9 ms** | **31.1 ms** | **40.0 ms** | **152.4 ms** | 135 / 287 / 301 q/s |
+| GB10, next to a busy LLM | 326.6 ms | 278.6 ms | 258.1 ms | 381.6 ms | 23 / 88 / 153 q/s |
+| Apple M2 Max, fp32 | **30.3 ms** | **63.1 ms** | **107.4 ms** | **462.3 ms** | 72 / 102 / 106 q/s |
+| model card, T4 english | 39.5 ms | — | 158.6 ms | 771 ms | — |
+| model card, T4 multilingual | 32.8 ms | — | 72.3 ms | 337 ms | — |
 
-Throughput, 4-question calls: **135 / 287 / 301 questions per second** at one, eight and
-thirty-two callers on the GB10, and **72 / 102 / 106** on the M2 Max, where the ceiling arrives
-at eight. The T4 figures are in-process SDK calls on older hardware; they are here for scale,
-not as a ranking.
+The M2 Max ceiling arrives at eight callers and does not move after that. The T4 figures are the
+model card's own, in-process SDK calls on older hardware; they are here for scale, not as a
+ranking.
 
 ### The two settings that are worth understanding
 
@@ -282,7 +282,14 @@ Measured with an unrelated LLM already holding 63,871 MiB on the same GPU:
 | host RSS | 3.6 GB |
 | host memory before / after starting it | 74 GiB / 82 GiB used of 121 |
 
-The LLM was serving throughout and was unaffected. Three checkpoints is 1.16B parameters, which
+The LLM was serving throughout and was unaffected. Sharing the card is not free in the other
+direction, though, and the cost is worth knowing before you plan around it: while the LLM is
+actually decoding at 92 % GPU utilisation, a call takes roughly ten to fifteen times longer at
+the small question counts — 326 ms for one question instead of 20.9 — and throughput roughly
+halves, to 88 questions/s at eight callers against 287 idle, with no errors. Both sets of tables
+are in [bench/results.md](bench/results.md).
+
+Three checkpoints is 1.16B parameters, which
 is small enough that the decision is about whether you want all three rather than about whether
 they fit; `ARBITER_MODELS=english` alone is about 1.9 GB.
 
