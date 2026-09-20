@@ -7,6 +7,8 @@
 #   ./run.sh status    /healthz, /readyz and /v1/models
 #   ./run.sh smoke     a handful of real requests across all three checkpoints
 #   ./run.sh bench     latency and throughput against a running server
+#   ./run.sh equivalence   compare every dtype/mode path against the SDK reference
+#   ./run.sh test      the pytest suite
 #
 # Every setting is an environment variable; see the table in README.md.
 set -euo pipefail
@@ -205,7 +207,7 @@ cmd_test() {
 }
 
 usage() {
-  sed -n '2,12p' "$HERE/run.sh" | sed 's/^# \{0,1\}//'
+  sed -n '2,14p' "$HERE/run.sh" | sed 's/^# \{0,1\}//'
 }
 
 case "${1:-}" in
