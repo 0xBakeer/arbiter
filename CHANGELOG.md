@@ -73,7 +73,11 @@ no longer `cuda` but the best device present — cuda, else mps, else cpu.
   `arbiter_classify`, `arbiter_score`, `arbiter_gate` and `arbiter_decide` over MCP; the Claude Code plugin
   adds a skill and a `PreToolUse` hook that judges every `Bash` command in tens of milliseconds
   and fails open when the server is not there. Ready-made configuration for Codex, OpenCode, omp
-  and any generic `.mcp.json` client, plus a GitHub Actions job that gates pull requests.
+  and any generic `.mcp.json` client, plus a GitHub Actions job that gates pull requests. The
+  hook, the MCP gate and the `examples/tool_call_guard.py` example share one
+  `guard_policy.py` — the same questions, the same risk arithmetic and the same thresholds — so
+  the three cannot drift apart, and `integrations/claude-code/hooks/eval.py` scores that policy
+  against a labelled set.
 - **A playground.** `GET /` serves `playground/index.html`, one self-contained page on the same
   origin as the API: a state, questions of all three types, and the answers with their
   probabilities, the checkpoint that answered and the latency. `playground/serve_stub.py` serves
@@ -90,6 +94,13 @@ no longer `cuda` but the best device present — cuda, else mps, else cpu.
   machine `ps -o rss` is meaningless — it read 1.6 GB and 230 MB for the same unchanged server —
   because the weights live in unified-memory buffers outside the resident set; `footprint -p`
   reports them, stable at 4,922 MB.
+- Next to an LLM decoding at 92 % GPU utilisation on the same GB10, the same calls take 326.6 ms
+  and 381.6 ms, and throughput roughly halves — 88 questions/s at eight callers against 287 with
+  the card idle, with no errors. Both sets of tables are in [bench/results.md](bench/results.md), labelled.
+- The Bash guard was scored on 117 labelled real `PreToolUse` events against the live server:
+  100% of the allow class decided allow, 0% of the deny class ever allowed, 90.6% of it decided
+  deny, and none of the ask class decided allow. Six events miss, and all six are named in
+  `integrations/claude-code/hooks/README.md` rather than averaged away.
 - Graphs mode was 306 ms on a 50-question call before the bucket ladders were made fine-grained
   and 229 ms after. The marker dimension, which was the obvious suspect, accounted for 0.1 ms of
   that; the sequence ladder accounted for the rest.
