@@ -4,9 +4,11 @@ The backend here is the smallest one that satisfies the interface in `engines/RE
 is also the point of the test: loading, batching, the queue cap, naming the answers and the
 warm-up are the server's, not the model's.
 """
+import importlib.util
+
 import pytest
 
-from server.engine import Engine
+from server.engine import Engine, engine_from_env
 from server.errors import OverloadedError
 
 
@@ -80,3 +82,12 @@ def test_the_interface_is_what_a_backend_must_implement():
 
     with pytest.raises(NotImplementedError):
         Nothing(("english",))
+
+
+def test_the_configured_engine_is_a_package_under_engines(monkeypatch):
+    """The backend is selected by name, not by an import the server carries."""
+    assert importlib.util.find_spec("engines.laya.loader") is not None
+
+    monkeypatch.setenv("ARBITER_ENGINE", "nope")
+    with pytest.raises(ModuleNotFoundError, match="engines.nope"):
+        engine_from_env()
