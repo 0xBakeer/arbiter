@@ -24,8 +24,8 @@ The layout follows from the same idea. `server/` is model-agnostic: the HTTP sur
 cross-request batcher and a four-method engine interface. `engines/laya/` implements that
 interface over the SDK and `ARBITER_ENGINE` selects it, so a model trained here later plugs in
 without touching the server. `recipes/nvidia/` holds the install-and-serve notes for CUDA and
-`recipes/apple/` is the Apple Silicon lane, which is next and not yet measured; `bench/results.md`
-now has a section per machine so the two cannot be confused for each other.
+`recipes/apple/` is the Apple Silicon lane on torch's MPS backend; `bench/results.md` has a
+section per machine so the two cannot be confused for each other. Both are measured.
 
 ### Defaults that changed
 
@@ -37,6 +37,11 @@ reversal is visible as a reversal.
 |---|---|---|---|
 | `ARBITER_DTYPE` | `autocast` | `bf16` parameters, 15–35% faster | moves reported probabilities by up to 2.1e-2 and flips one argmax out of 22 |
 | `ARBITER_MODE` | `eager` | `graphs`, 20% faster at one question | 1.5× slower at 50 questions and 14% lower throughput at concurrency 8 |
+| `ARBITER_DTYPE` on MPS | `fp32` | `fp16` or `bf16` parameters | 1.26e-2 and 6.06e-2 of probability error against the SDK reference; neither was benchmarked, because a dtype outside the gate does not get a speed number |
+
+There is also one variable that was renamed on the way in and has no old name to be compatible
+with, since nothing public depended on it: `DEVICE` is now `ARBITER_DEVICE`, and its default is
+no longer `cuda` but the best device present — cuda, else mps, else cpu.
 
 ### Added
 
@@ -49,7 +54,13 @@ reversal is visible as a reversal.
 - **Cross-request micro-batching.** A worker thread per checkpoint collects question rows from
   concurrent requests into one forward. 135 questions/s at one caller becomes 287 at eight.
 - **CUDA-graph mode** (`ARBITER_MODE=graphs`), with bucketed shapes, lazy capture, a shared memory
-  pool, and an eager fallback for anything outside a bucket.
+  pool, and an eager fallback for anything outside a bucket. On a non-CUDA device it refuses
+  rather than quietly running eager.
+- **An Apple Silicon lane** (`recipes/apple/`), measured on an M2 Max: torch's MPS wheels from
+  plain PyPI, the device detected through `ARBITER_DEVICE`, `supported_dtypes()` deciding per
+  device which parameter modes are worth offering, and `fp16`/`bf16` as whole-model dtypes where
+  autocast does not apply. `/readyz` now reports the device and the dtype that were actually
+  taken, not the ones that were asked for.
 - **`tools/equivalence.py`**, which is the reason the defaults are what they are: 22 mixed
   questions through the SDK reference and every dtype/mode combination, reporting max |Δp| and
   argmax agreement. `autocast/eager` comes out identical to the reference at four decimals.
@@ -72,14 +83,22 @@ reversal is visible as a reversal.
 
 ### Measured
 
-- 20.9 ms for one question, 152.4 ms for fifty in one call, against the model card's T4 figures
-  of 39.5 ms and 771 ms. Full method in [bench/results.md](bench/results.md).
+- 20.9 ms for one question, 152.4 ms for fifty in one call on a GB10, against the model card's
+  T4 figures of 39.5 ms and 771 ms. Full method in [bench/results.md](bench/results.md).
+- 30.3 ms and 462.3 ms for the same two calls on an Apple M2 Max in fp32, with the throughput
+  ceiling at eight concurrent callers (106 questions/s) and a cold load of 88-101 s. On that
+  machine `ps -o rss` is meaningless — it read 1.6 GB and 230 MB for the same unchanged server —
+  because the weights live in unified-memory buffers outside the resident set; `footprint -p`
+  reports them, stable at 4,922 MB.
 - Graphs mode was 306 ms on a 50-question call before the bucket ladders were made fine-grained
   and 229 ms after. The marker dimension, which was the obvious suspect, accounted for 0.1 ms of
   that; the sequence ladder accounted for the rest.
 
 ### Known limits
 
+- On MPS, `fp16` and `bf16` parameters miss the equivalence gate by 1.26e-2 and 6.06e-2, so the
+  Apple lane ships fp32 and there is no faster dtype to reach for there. CUDA graphs have no
+  equivalent on that backend either.
 - A `choice` question with more than about 125 options cannot fit its markers in the English
   checkpoint's 512-token context. The server answers `422` rather than silently answering a
   truncated question. Jev's own limit is 255.

@@ -18,13 +18,14 @@ and the measurements that picked every default. The model is a plug: **Laya** to
 three checkpoints (English, multilingual, and a typed-decisions fine-tune) resident at once and
 automatic routing between them, and whatever is trained here next behind the same interface
 ([engines/README.md](engines/README.md)). So is the machine: one recipe per accelerator under
-[recipes/](recipes), NVIDIA measured and Apple next.
+[recipes/](recipes), NVIDIA and Apple Silicon both measured.
 
 On one GB10 it answers a single question in **20.9 ms** and fifty questions in one call in
-**152 ms**, measured end-to-end over HTTP. Realistic states — a support ticket, an email, a
-diff — carry more tokens and more questions, and land in the **tens of milliseconds**; the
-captured runs are in [docs/use-cases.md](docs/use-cases.md). It uses about 5 GB of GPU memory,
-which is little enough to sit next to a large language model on the same card.
+**152 ms**, measured end-to-end over HTTP; on an M2 Max Mac the same calls take **30.3 ms** and
+**462 ms**. Realistic states — a support ticket, an email, a diff — carry more tokens and more
+questions, and land in the **tens of milliseconds**; the captured runs are in
+[docs/use-cases.md](docs/use-cases.md). It uses about 5 GB of GPU memory, which is little enough
+to sit next to a large language model on the same card.
 
 ![One call, many typed answers](docs/assets/one-call-typed-answers.svg)
 
@@ -35,10 +36,14 @@ which is little enough to sit next to a large language model on the same card.
 Python 3.12 or newer, and one of the two lanes below. Each has its own notes and its own
 numbers, because the wheels and the measurements differ by machine:
 
-- **[recipes/nvidia](recipes/nvidia/README.md)** — an NVIDIA GPU with a recent driver. The torch
+- **NVIDIA GPU → [recipes/nvidia](recipes/nvidia/README.md)**, with a recent driver. The torch
   wheels come from the CUDA 13.0 index, which has both aarch64 and x86_64 builds, so this is not
-  specific to any one box. Every figure published here was taken on this lane.
-- **[recipes/apple](recipes/apple/README.md)** — Apple Silicon. Measured next.
+  specific to any one box.
+- **Apple Silicon → [recipes/apple](recipes/apple/README.md)**, torch's MPS backend from plain
+  PyPI. fp32 parameters, no CUDA graphs, and a slower cold load; the recipe says why.
+
+`./run.sh setup` picks the lane from `uname`, and the device is detected rather than configured:
+`ARBITER_DEVICE` defaults to cuda if there is a CUDA device, else mps, else cpu.
 
 ```bash
 git clone https://github.com/0xBakeer/arbiter.git
@@ -194,21 +199,27 @@ requests, is in [`integrations/`](integrations) and documented in
 
 ## The numbers
 
-One GB10, questions cycling through all three types, measured end-to-end over HTTP.
-Full method and the rest of the figures in [bench/results.md](bench/results.md).
+Questions cycling through all three types, measured end-to-end over HTTP, on each machine's own
+shipped defaults — a GB10 in autocast bf16, an M2 Max in fp32. Full method and the rest of the
+figures in [bench/results.md](bench/results.md).
 
-| questions in one call | this recipe | model card, T4 english | model card, T4 multilingual |
-|---:|---:|---:|---:|
-| 1  | **20.9 ms** | 39.5 ms | 32.8 ms |
-| 5  | **31.1 ms** | — | — |
-| 10 | **40.0 ms** | 158.6 ms | 72.3 ms |
-| 50 | **152.4 ms** | 771 ms | 337 ms |
+| questions in one call | GB10 | Apple M2 Max | model card, T4 english | model card, T4 multilingual |
+|---:|---:|---:|---:|---:|
+| 1  | **20.9 ms** | **30.3 ms** | 39.5 ms | 32.8 ms |
+| 5  | **31.1 ms** | **63.1 ms** | — | — |
+| 10 | **40.0 ms** | **107.4 ms** | 158.6 ms | 72.3 ms |
+| 50 | **152.4 ms** | **462.3 ms** | 771 ms | 337 ms |
 
-Throughput, 4-question calls: **135 questions/s** at one caller, **287/s** at eight, **301/s**
-at thirty-two. The T4 figures are in-process SDK calls on older hardware; they are here for
-scale, not as a ranking.
+Throughput, 4-question calls: **135 / 287 / 301 questions per second** at one, eight and
+thirty-two callers on the GB10, and **72 / 102 / 106** on the M2 Max, where the ceiling arrives
+at eight. The T4 figures are in-process SDK calls on older hardware; they are here for scale,
+not as a ranking.
 
 ### The two settings that are worth understanding
+
+Both of them are CUDA stories, and both end differently on a Mac: `autocast` there means fp32,
+`graphs` is refused outright, and `fp16` and `bf16` lose more precision than bf16 does here.
+[recipes/apple](recipes/apple/README.md) has that side.
 
 **`ARBITER_DTYPE`** — `autocast` (default) keeps fp32 parameters and runs the matmuls in bf16, as
 the SDK does. `bf16` converts the parameters and drops autocast, which is 15–35% faster:
@@ -223,7 +234,8 @@ that they ship over-confident and want refitting on your data before you trust t
 2e-2 of that budget to save six milliseconds is the wrong trade. It is one environment variable
 away if your workload disagrees.
 
-**`ARBITER_MODE`** — `eager` (default) or `graphs`. Graphs mode captures the forward as a CUDA
+**`ARBITER_MODE`** — `eager` (default) or `graphs`, which needs CUDA and says so on any other
+device rather than quietly running eager. Graphs mode captures the forward as a CUDA
 graph per padded shape bucket and replays it, which removes the cost of launching several
 hundred small kernels. It is faster where there is little work to amortise padding over and
 slower where there is plenty:
@@ -245,11 +257,11 @@ is inside the gate but not nothing.
 | variable | default | |
 |---|---|---|
 | `PORT` / `HOST` | `8010` / `0.0.0.0` | |
-| `DEVICE` | `cuda` | `cpu` works, and is roughly an order of magnitude slower |
+| `ARBITER_DEVICE` | detected | `cuda`, else `mps`, else `cpu`; set it to pin one, and `/readyz` reports what was taken |
 | `ARBITER_ENGINE` | `laya` | which package under [`engines/`](engines) serves the requests |
 | `ARBITER_MODELS` | all three | comma-separated; a subset saves memory, and the router falls back to what is loaded |
-| `ARBITER_MODE` | `eager` | or `graphs` |
-| `ARBITER_DTYPE` | `autocast` | or `bf16` |
+| `ARBITER_MODE` | `eager` | or `graphs`, which is CUDA-only and refuses to run anywhere else |
+| `ARBITER_DTYPE` | `autocast` | or `bf16` on CUDA; `fp16` and `bf16` on MPS, where autocast means fp32 |
 | `ARBITER_API_KEY` | unset | set it to require `Authorization: Bearer` |
 | `ARBITER_BATCH_WAIT_MS` | `2` | how long a batch waits for company |
 | `ARBITER_MAX_BATCH` | `64` | question rows per forward |
@@ -315,7 +327,7 @@ matter more than anything this recipe does.
 - [docs/serving-options.md](docs/serving-options.md) — what was considered, what shipped, and
   what was ruled out with the measurement that ruled it out
 - [recipes/nvidia](recipes/nvidia/README.md) and [recipes/apple](recipes/apple/README.md) — one
-  install-and-serve recipe per machine, with that machine's numbers
+  install-and-serve recipe per machine, with that machine's numbers and its own chosen dtype
 - [engines/README.md](engines/README.md) — the four methods a model backend implements
 - [bench/results.md](bench/results.md) — every figure and how it was taken
 - [CHANGELOG.md](CHANGELOG.md) — which defaults changed when
