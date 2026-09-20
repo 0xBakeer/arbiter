@@ -11,7 +11,7 @@ therefore a measurement epoch — the configuration as it stood, and the figures
 Every entry leads with **Defaults that changed**, because that is the part that alters what you
 would measure if you ran the recipe yourself. `./run.sh` prints the version it was launched from.
 
-## Unreleased
+## v0.2.0 — 2026-09-20
 
 A third engine, opt-in, on a lane that already had two dtypes and one backend — and six games the
 model plays in the browser, served from the same origin as the API.
