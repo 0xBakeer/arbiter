@@ -45,6 +45,8 @@ Below, `/ABS/PATH` is the absolute path to your checkout.
 
 ## Claude Code
 
+![The guard judging Bash commands inside Claude Code](media/claude-code.gif)
+
 One command for the tools alone:
 
 ```bash

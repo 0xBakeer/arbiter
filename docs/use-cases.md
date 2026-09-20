@@ -1,5 +1,7 @@
 # Use cases
 
+![The playground answering a support ticket, then a German invoice](media/playground.gif)
+
 Nine runnable examples, one per file in [`../examples/`](../examples). Every one of them:
 
 * defines its questions **once, as data**, so the question set is a thing you can read and edit

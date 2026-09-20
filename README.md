@@ -3,6 +3,12 @@
 Serve typed-decision models — Laya or your own — on your GPU or your Mac, with a Jev-compatible
 API.
 
+Read the story behind it: [My cat woke me at five on a Sunday, so I built a local Jev](https://blog.0xbakeer.com/my-cat-woke-me-at-five-on-a-sunday-so-i-built-a-local-jev-1350583cddc6?sharedUserId=0xbakeer)
+
+![How it works](docs/media/how-it-works.gif)
+
+What it does with a state and a set of questions, and where it sits next to an LLM.
+
 ## Why the name, and what this is
 
 A typed-decision model answers questions about a piece of text in **one forward pass** — no
@@ -52,6 +58,8 @@ cd arbiter
 ./run.sh serve      # http://localhost:8010
 ```
 
+![Clone, setup, serve, on a Mac](docs/media/install.gif)
+
 ```bash
 ./run.sh status     # /healthz, /readyz, /v1/models
 ./run.sh smoke      # the playground page and seven real requests across all three checkpoints
@@ -62,6 +70,8 @@ cd arbiter
 ```
 
 ## Playground
+
+![The playground answering a support ticket, then a German invoice](docs/media/playground.gif)
 
 `./run.sh serve` also serves a page at `http://localhost:8010/`: paste a state, add questions of
 all three types, and read the answers with their probabilities, the checkpoint that answered and
@@ -178,6 +188,8 @@ confidence-gated routing, composite scoring, hierarchical intent, cascade — ar
 [`docs/patterns.md`](docs/patterns.md).
 
 ## Use it from your coding agent
+
+![The guard judging Bash commands inside Claude Code](docs/media/claude-code.gif)
 
 [`integrations/mcp/arbiter_mcp.py`](integrations/mcp/arbiter_mcp.py) is an MCP server over the same
 endpoint: `arbiter_check`, `arbiter_classify`, `arbiter_score`, `arbiter_gate` and `arbiter_decide`, each
@@ -339,5 +351,7 @@ matter more than anything this recipe does.
 - [bench/results.md](bench/results.md) — every figure and how it was taken
 - [CHANGELOG.md](CHANGELOG.md) — which defaults changed when
 - [CREDITS.md](CREDITS.md) — the model, the encoders, and the API shape are other people's work
+- [My cat woke me at five on a Sunday, so I built a local Jev](https://blog.0xbakeer.com/my-cat-woke-me-at-five-on-a-sunday-so-i-built-a-local-jev-1350583cddc6?sharedUserId=0xbakeer) — the
+  article this came out of: why a typed-decision model, and what it is for
 
 MIT licensed. The model weights are Apache-2.0 from Convai Innovations and carry their own terms.
