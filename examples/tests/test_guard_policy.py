@@ -118,6 +118,13 @@ def test_cwd_kind_reads_the_filesystem_for_the_other_three(fixture_home):
     assert policy.cwd_kind(tempfile.gettempdir(), fixture_home) == "tmp"
 
 
+def test_cwd_kind_calls_the_temp_root_itself_tmp(fixture_home):
+    """`/tmp` has no trailing separator, and on Linux that is exactly what gettempdir() returns."""
+    for root in ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders"):
+        assert policy.cwd_kind(root, fixture_home) == "tmp"
+    assert policy.cwd_kind("/tmpfoo", fixture_home) == "system"
+
+
 def test_the_state_carries_the_command_the_description_and_a_word_for_the_directory(fixture_home):
     os.makedirs(fixture_home)
     state = policy.build_state("ls -la", "List the files", fixture_home, fixture_home)

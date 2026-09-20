@@ -25,7 +25,7 @@ import re
 
 # --------------------------------------------------------------------------- state
 
-_TMP_PREFIXES = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
+_TMP_ROOTS = ("/tmp", "/private/tmp", "/var/folders", "/private/var/folders")
 
 
 def cwd_kind(cwd, home=None):
@@ -41,7 +41,7 @@ def cwd_kind(cwd, home=None):
     if not cwd:
         return "system"
     path = os.path.abspath(os.path.expanduser(cwd))
-    if path.startswith(_TMP_PREFIXES):
+    if any(path == root or path.startswith(root + os.sep) for root in _TMP_ROOTS):
         return "tmp"
     probe = path
     while True:
