@@ -192,11 +192,22 @@ def test_no_auto_allow_turns_an_allow_into_silence():
     assert decision_of(done) == "deny"
 
 
-def test_the_log_file_records_the_decision(tmp_path):
+def test_the_log_file_records_the_decision_and_the_command_it_was_about(tmp_path):
     log = tmp_path / "guard.log"
     with StubServer(scripted=QUIET) as stub:
-        run(bash(), stub.url, ARBITER_GUARD_LOG=str(log))
-    assert "allow" in log.read_text()
+        run(bash("npm run build"), stub.url, ARBITER_GUARD_LOG=str(log))
+        run(bash("git status --short"), stub.url, ARBITER_GUARD_LOG=str(log))
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2
+    assert "allow" in lines[0] and "$ npm run build" in lines[0]
+    assert "$ git status --short" in lines[1], "the fast path must be auditable too"
+
+
+def test_a_multi_line_command_stays_on_one_log_line(tmp_path):
+    log = tmp_path / "guard.log"
+    with StubServer(scripted=QUIET) as stub:
+        run(bash("npm run build\nnpm test"), stub.url, ARBITER_GUARD_LOG=str(log))
+    assert len(log.read_text().splitlines()) == 1
 
 
 # --------------------------------------------------------------------- the plugin files

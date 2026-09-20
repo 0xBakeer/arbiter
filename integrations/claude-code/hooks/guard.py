@@ -53,23 +53,25 @@ NO_FAST_PATH = os.environ.get("ARBITER_GUARD_NO_FAST_PATH") == "1"
 LOG = os.environ.get("ARBITER_GUARD_LOG")
 
 
-def log(message):
+def log(message, command=None):
+    """One line per decision, with the command on it: a guard log nobody can audit is not one."""
     if not LOG:
         return
     try:
         with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("%s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), message))
+            handle.write("%s %s%s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), message,
+                                        "  $ %s" % command.replace("\n", " ") if command else ""))
     except OSError:
         pass
 
 
-def emit(decision, reason):
+def emit(decision, reason, command=None):
     """Write the PreToolUse decision and stop.
 
     An "allow" with ARBITER_GUARD_NO_AUTO_ALLOW set becomes silence, which is not the same thing:
     silence means "no opinion, run the normal permission flow", while "allow" skips it.
     """
-    log("%s: %s" % (decision, reason))
+    log("%s: %s" % (decision, reason), command)
     if decision == "allow" and NO_AUTO_ALLOW:
         sys.exit(0)
     json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
@@ -104,21 +106,21 @@ def main():
 
     if not NO_FAST_PATH and policy.is_read_only(command):
         decision, _, reason = policy.decide(None, command)     # no round trip needed
-        emit(decision, reason)
+        emit(decision, reason, command)
 
     state = policy.build_state(command, tool_input.get("description"), event.get("cwd"))
     try:
         response = ask_arbiter(state)
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        log("unreachable: %s" % exc)
+        log("unreachable: %s" % exc, command)
         if FAIL_CLOSED:
             emit("ask", "Arbiter guard could not reach %s (%s); asking rather than guessing."
-                 % (ARBITER_URL, exc))
+                 % (ARBITER_URL, exc), command)
         print("arbiter guard: %s unreachable (%s); allowing" % (ARBITER_URL, exc), file=sys.stderr)
         sys.exit(0)
 
     decision, _, reason = policy.decide(response["answers"], command)
-    emit(decision, reason)
+    emit(decision, reason, command)
 
 
 if __name__ == "__main__":
