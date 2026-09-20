@@ -1,6 +1,6 @@
 /* arbiter plays — the shared side panel every game page mounts.
 
-   const panel = mountPanel(el, { meta, questions });
+   const panel = mountPanel(el, { meta, questions, strip: true });   // strip:false hides the last-decisions strip
    panel.update({ questions?, answers, decision:{action, extras}, shield:{intervened, reason, action?},
                   timing:{inference_ms, roundtrip_ms, decisions_per_s},
                   counters:{decisions, interventions, tokens},
@@ -126,7 +126,7 @@ export function mountPanel(root, opts = {}) {
   const strip = el('div', 'strip');
   strip.innerHTML = `<span class="lbl"><span>Last decisions</span><span>newest on the right</span></span><div class="items"></div>`;
   const items = strip.querySelector('.items');
-  box.appendChild(strip);
+  if (opts.strip !== false) box.appendChild(strip);        // a board that draws its own trail passes strip:false
 
   function setCount(n) {
     const s = String(Math.max(0, n | 0)).padStart(4, '0');
