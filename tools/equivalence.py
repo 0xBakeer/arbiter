@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cases import CASES                                     # noqa: E402
-from server.engine import SUBFOLDER, Checkpoint             # noqa: E402
+from engines.laya.loader import SUBFOLDER, Checkpoint      # noqa: E402
 
 
 def probs_of(answer: Dict[str, Any]) -> np.ndarray:

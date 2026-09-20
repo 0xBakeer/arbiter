@@ -164,13 +164,13 @@ def create_app(engine=None) -> FastAPI:
         eng = app.state.engine
         if not app.state.ready or eng is None:
             return JSONResponse(status_code=503, content={"status": "loading"})
-        return {"status": "ready", "models": eng.loaded, "mode": eng.mode,
+        return {"status": "ready", "models": eng.checkpoints(), "mode": eng.mode,
                 "dtype": eng.dtype_mode, "version": VERSION}
 
     @app.get("/v1/models")
     async def models():
         eng = app.state.engine
-        loaded = eng.loaded if eng is not None else []
+        loaded = eng.checkpoints() if eng is not None else []
         created = int(time.time())
         data = [{"id": "laya-%s" % n, "object": "model", "created": created,
                  "owned_by": "convaiinnovations",
@@ -236,7 +236,7 @@ def create_app(engine=None) -> FastAPI:
             app.state.metrics.observe_request(name, 422, len(questions), time.perf_counter() - started)
             return JSONResponse(status_code=422, content=error_body(
                 "invalid_request_error",
-                "checkpoint %r is not loaded on this server; loaded: %s" % (name, eng.loaded)))
+                "checkpoint %r is not loaded on this server; loaded: %s" % (name, eng.checkpoints())))
 
         elapsed = time.perf_counter() - started
         app.state.metrics.observe_request(name, 200, len(questions), elapsed)

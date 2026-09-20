@@ -24,7 +24,7 @@ STATE = "I was charged twice for the same subscription and nobody has replied to
 
 @pytest.fixture(scope="module")
 def checkpoint():
-    from server.engine import Checkpoint
+    from engines.laya.loader import Checkpoint
 
     return Checkpoint("english", MODELS_DIR, device=os.environ.get("DEVICE", "cpu"), mode="eager")
 
@@ -77,3 +77,21 @@ def test_the_largest_option_set_that_still_fits(checkpoint):
     rows = checkpoint.build_rows(STATE, choice_with(124))
     assert len(rows[0]["markers"]) == 124
     assert len(rows[0]["ids"]) <= checkpoint.max_len
+
+
+def test_the_backend_answers_through_the_engine_interface():
+    """The other end of the split: `LayaEngine` under the generic batcher, start to finish."""
+    from engines.laya.loader import LayaEngine
+
+    engine = LayaEngine(MODELS_DIR, names=("english",), device=os.environ.get("DEVICE", "cpu"),
+                        wait_ms=0)
+    try:
+        assert engine.checkpoints() == ["english"]
+        assert engine.route(STATE, QUESTIONS)["model"] == "english"
+        out = engine.infer("english", STATE, QUESTIONS)
+        assert list(out["answers"]) == ["angry", "queue", "urgency"]
+        assert out["answers"]["queue"]["choice"] in ("billing", "technical")
+        assert out["input_tokens"] > 0
+        assert out["batch_rows"] == 3
+    finally:
+        engine.close()

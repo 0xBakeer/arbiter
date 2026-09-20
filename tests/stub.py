@@ -38,8 +38,7 @@ class StubEngine:
         self.queue_depth = 0
         self.calls = []
 
-    @property
-    def loaded(self):
+    def checkpoints(self):
         return list(self._loaded)
 
     def close(self):

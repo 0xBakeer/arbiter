@@ -247,6 +247,7 @@ is inside the gate but not nothing.
 |---|---|---|
 | `PORT` / `HOST` | `8010` / `0.0.0.0` | |
 | `DEVICE` | `cuda` | `cpu` works, and is roughly an order of magnitude slower |
+| `ARBITER_ENGINE` | `laya` | which package under [`engines/`](engines) serves the requests |
 | `ARBITER_MODELS` | all three | comma-separated; a subset saves memory, and the router falls back to what is loaded |
 | `ARBITER_MODE` | `eager` | or `graphs` |
 | `ARBITER_DTYPE` | `autocast` | or `bf16` |
