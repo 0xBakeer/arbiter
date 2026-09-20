@@ -1,0 +1,14 @@
+# Add this to ~/.codex/config.toml (user-wide) or .codex/config.toml (this project only).
+# Replace /ABS/PATH with the absolute path to your checkout.
+
+[mcp_servers.laya]
+command = "python3"
+args = ["/ABS/PATH/integrations/mcp/laya_mcp.py"]
+env = { LAYA_URL = "http://localhost:8010", LAYA_MODEL = "auto" }
+startup_timeout_sec = 15
+
+# With the package installed (`pip install /ABS/PATH/integrations/mcp`) the command is simply:
+#
+#   [mcp_servers.laya]
+#   command = "laya-mcp"
+#   env = { LAYA_URL = "http://localhost:8010" }

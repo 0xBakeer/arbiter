@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "laya": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/../mcp/laya_mcp.py"],
+      "env": {
+        "LAYA_URL": "http://localhost:8010",
+        "LAYA_MODEL": "auto"
+      }
+    }
+  }
+}

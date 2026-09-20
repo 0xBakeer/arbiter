@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "laya": {
+      "type": "local",
+      "command": ["python3", "/ABS/PATH/integrations/mcp/laya_mcp.py"],
+      "enabled": true,
+      "environment": {
+        "LAYA_URL": "http://localhost:8010",
+        "LAYA_MODEL": "auto"
+      }
+    }
+  }
+}

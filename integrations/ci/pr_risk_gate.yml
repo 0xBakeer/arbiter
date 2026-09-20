@@ -1,0 +1,88 @@
+# Gate pull requests on the diff itself, using a self-hosted Laya server.
+#
+# Copy to .github/workflows/pr-risk-gate.yml. It needs one of:
+#
+#   * a self-hosted runner that can reach the Laya server (the default below), or
+#   * `runs-on: ubuntu-latest` plus a LAYA_URL the runner can actually reach.
+#
+# Configure with a repository variable LAYA_URL (for example http://laya.internal:8010) and,
+# if the server requires one, a repository secret LAYA_API_KEY.
+#
+# Exit codes from examples/pr_risk_gate.py are the whole contract: 0 allow, 1 review, 2 block,
+# 3 the server could not be reached.
+name: PR risk gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: laya-risk-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  risk:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Judge the diff
+        id: gate
+        env:
+          LAYA_URL: ${{ vars.LAYA_URL || 'http://localhost:8010' }}
+          LAYA_API_KEY: ${{ secrets.LAYA_API_KEY }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -o pipefail
+          git diff "origin/${{ github.event.pull_request.base.ref }}...HEAD" > pr.diff
+          description=$(printf '%s\n\n%s' "$TITLE" "$BODY")
+          set +e
+          python examples/pr_risk_gate.py --state pr.diff --description "$description" | tee report.txt
+          echo "verdict=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on the pull request
+        if: always() && steps.gate.outputs.verdict != '3'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "### Laya risk gate"
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+            echo
+            echo "_The thresholds live in \`examples/pr_risk_gate.py\`. Disagree with the verdict? Argue with the numbers._"
+          } > comment.md
+          # One comment per pull request, rewritten on every push, rather than a new one each time.
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body-file comment.md --edit-last --create-if-none
+
+      - name: Fail on block
+        if: steps.gate.outputs.verdict == '2'
+        run: |
+          echo "::error::Laya blocked this change. See the risk-gate comment on the pull request."
+          exit 1
+
+      - name: Warn on review
+        if: steps.gate.outputs.verdict == '1'
+        run: echo "::warning::Laya wants a human review of this change."
+
+      - name: The decision server was unreachable
+        if: steps.gate.outputs.verdict == '3'
+        run: |
+          echo "::warning::Could not reach the Laya server at ${{ vars.LAYA_URL }}; the gate did not run."
+          # Fail open: a decision service that is down must not block every merge. Set the
+          # repository variable LAYA_FAIL_CLOSED to 1 to turn that around.
+          if [ "${{ vars.LAYA_FAIL_CLOSED }}" = "1" ]; then exit 1; fi
