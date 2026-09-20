@@ -101,9 +101,11 @@ cmd_setup() {
   # torch first and from the CUDA index, so the rest resolve against the build that is staying.
   # torchvision and torchaudio are not installed: nothing here uses them.
   "$PY" -m pip install torch --index-url "$TORCH_INDEX"
+  # mcp is not needed to serve, but `./run.sh test` covers integrations/mcp over stdio, and a
+  # fresh setup should be able to run both suites.
   "$PY" -m pip install \
       "transformers>=5" safetensors huggingface_hub numpy \
-      fastapi "uvicorn[standard]" "laya==0.3.4" pytest httpx
+      fastapi "uvicorn[standard]" "laya==0.3.4" "mcp>=2" pytest httpx
 
   echo
   "$PY" - <<'PYCHECK'

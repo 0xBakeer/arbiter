@@ -27,7 +27,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN pip install --upgrade pip wheel \
     && pip install torch --index-url https://download.pytorch.org/whl/cu130 \
     && pip install "transformers>=5" safetensors huggingface_hub numpy \
-                   fastapi "uvicorn[standard]" "laya==0.3.4" pytest httpx
+                   fastapi "uvicorn[standard]" "laya==0.3.4" "mcp>=2" pytest httpx
 
 COPY . /app
 
