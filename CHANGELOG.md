@@ -11,6 +11,29 @@ therefore a measurement epoch — the configuration as it stood, and the figures
 Every entry leads with **Defaults that changed**, because that is the part that alters what you
 would measure if you ran the recipe yourself. `./run.sh` prints the version it was launched from.
 
+## v0.1.1 — 2026-09-20
+
+Documentation only. The recordings that were made for the write-up now live in the repository,
+re-encoded small enough to sit in it, and the article that the project came out of is linked from
+the README.
+
+### Defaults that changed
+
+None. Nothing in `server/`, `engines/` or the recipes was touched, so every figure in
+[bench/results.md](bench/results.md) still belongs to this version.
+
+### Documentation
+
+- **The article** — [My cat woke me at five on a Sunday, so I built a local
+  Jev](https://blog.0xbakeer.com/my-cat-woke-me-at-five-on-a-sunday-so-i-built-a-local-jev-1350583cddc6?sharedUserId=0xbakeer),
+  linked under the tagline and from the documentation list.
+- **Four GIFs in `docs/media/`** — how it works, the playground, the Claude Code guard, and the
+  install on a Mac. 960 px wide, re-encoded from the source captures to 10.2 MB in total so that
+  a clone stays cheap.
+- **A poster PNG per GIF**, 1280 px wide, for the places where a still frame reads better than a
+  loop.
+- `docs/media` is in `.dockerignore`, so the recordings do not ride along into the image.
+
 ## v0.1.0 — 2026-09-20
 
 First release. Renamed from laya-spark to arbiter before it: the repository is the serving
