@@ -32,9 +32,13 @@ which is little enough to sit next to a large language model on the same card.
 
 ## Install
 
-You need an NVIDIA GPU with a recent driver, and Python 3.12 or newer. The torch wheels come
-from the CUDA 13.0 index, which has both aarch64 and x86_64 builds, so this is not specific to
-any one box.
+Python 3.12 or newer, and one of the two lanes below. Each has its own notes and its own
+numbers, because the wheels and the measurements differ by machine:
+
+- **[recipes/nvidia](recipes/nvidia/README.md)** — an NVIDIA GPU with a recent driver. The torch
+  wheels come from the CUDA 13.0 index, which has both aarch64 and x86_64 builds, so this is not
+  specific to any one box. Every figure published here was taken on this lane.
+- **[recipes/apple](recipes/apple/README.md)** — Apple Silicon. Measured next.
 
 ```bash
 git clone https://github.com/0xBakeer/arbiter.git
@@ -42,11 +46,6 @@ cd arbiter
 ./run.sh setup      # .venv, torch, the deps, and the three checkpoints (2.3 GB)
 ./run.sh serve      # http://localhost:8010
 ```
-
-`setup` prefers an interpreter that ships its development headers, because torch routes a couple
-of eager operations through Triton and Triton JIT-compiles a small C extension the first time
-one runs. If no such interpreter is available it falls back and sets `TORCH_DISABLE_NATIVE_JIT=1`,
-which takes torch's plain kernels instead; it prints a line when it does.
 
 ```bash
 ./run.sh status     # /healthz, /readyz, /v1/models
@@ -315,6 +314,9 @@ matter more than anything this recipe does.
   per-agent configuration and the CI job
 - [docs/serving-options.md](docs/serving-options.md) — what was considered, what shipped, and
   what was ruled out with the measurement that ruled it out
+- [recipes/nvidia](recipes/nvidia/README.md) and [recipes/apple](recipes/apple/README.md) — one
+  install-and-serve recipe per machine, with that machine's numbers
+- [engines/README.md](engines/README.md) — the four methods a model backend implements
 - [bench/results.md](bench/results.md) — every figure and how it was taken
 - [CHANGELOG.md](CHANGELOG.md) — which defaults changed when
 - [CREDITS.md](CREDITS.md) — the model, the encoders, and the API shape are other people's work

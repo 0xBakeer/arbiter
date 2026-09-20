@@ -1,14 +1,23 @@
 # Measurements
 
-All figures taken on one NVIDIA GB10 (DGX Spark class, 128 GB unified memory, driver 580,
-CUDA 13.0, torch 2.14.0+cu130), 2026-09-20, with an unrelated LLM already resident on the same
-GPU. Every number is end-to-end over HTTP against `./run.sh serve`, not an in-process call, so
-it includes JSON parsing, routing, the batcher's wait and the response encode.
+One section per machine, because nothing here transfers between them: the wheels differ, the
+kernels differ, and a default chosen on one is a guess on the other. Each section says what was
+measured, on what, and when. The install and serve notes for a machine live next to it in
+[`recipes/`](../recipes).
+
+Every number is end-to-end over HTTP against `./run.sh serve`, not an in-process call, so it
+includes JSON parsing, routing, the batcher's wait and the response encode.
 
 The reference column is the model card's published figures for `laya`/`laya-multilingual` on a
 T4, which are in-process SDK calls. They are not the same measurement and the comparison is
 therefore generous to us in one direction (newer hardware) and harsh in the other (we pay for
 HTTP and they do not). It is here for scale, not for a ranking.
+
+# NVIDIA GB10
+
+DGX Spark class, 128 GB unified memory, driver 580, CUDA 13.0, torch 2.14.0+cu130, 2026-09-20,
+with an unrelated LLM already resident on the same GPU. Setup notes:
+[recipes/nvidia](../recipes/nvidia/README.md).
 
 ## Latency, one caller
 
@@ -91,3 +100,9 @@ a large and completely invisible tax.
 
 Even at the fine ladder, graphs only win where there is little work to amortise the padding
 over — one or five questions, one caller. See README.md for the resulting default.
+
+# Apple Silicon
+
+Not measured yet. [recipes/apple](../recipes/apple/README.md) says what has to be settled first;
+the tables land here under this heading, in the same shape as the GB10 ones, so the two machines
+can be read side by side.
