@@ -226,8 +226,15 @@ class Checkpoint:
                  max_markers: int = 32, dtype_mode: str = "autocast"):
         from laya.agent import Agent
 
+        device = resolve_device(device)
+        # Before the weights, not after: loading three checkpoints to then refuse the mode they
+        # were loaded for is a minute of someone's time for a one-line mistake.
+        if mode == "graphs" and not device.startswith("cuda"):
+            raise ValueError("ARBITER_MODE=graphs is CUDA graph capture and cannot run on %s; "
+                             "use ARBITER_MODE=eager" % device)
+
         self.name = name
-        self.agent = Agent(models_dir, device=resolve_device(device), subfolder=SUBFOLDER[name])
+        self.agent = Agent(models_dir, device=device, subfolder=SUBFOLDER[name])
         self.device = self.agent.device
         self.tok = self.agent.tok
         self.cfg = self.agent.cfg
@@ -267,9 +274,6 @@ class Checkpoint:
 
         self.graphs: Optional[GraphRunner] = None
         if mode == "graphs":
-            if self.device.type != "cuda":
-                raise ValueError("ARBITER_MODE=graphs is CUDA graph capture and cannot run on "
-                                 "%s; use ARBITER_MODE=eager" % self.device.type)
             self.graphs = GraphRunner(self.run_model, self.device, self.pad_id, self.cls_id,
                                       self.max_len, max_markers)
 

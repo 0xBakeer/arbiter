@@ -82,7 +82,9 @@ def test_the_largest_option_set_that_still_fits(checkpoint):
 
 def test_the_backend_answers_through_the_engine_interface():
     """The other end of the split: `LayaEngine` under the generic batcher, start to finish."""
-    from engines.laya.loader import LayaEngine
+    import torch
+
+    from engines.laya.loader import LayaEngine, supported_dtypes
 
     engine = LayaEngine(MODELS_DIR, names=("english",), device=os.environ.get("ARBITER_DEVICE", "auto"),
                         wait_ms=0)
@@ -94,5 +96,8 @@ def test_the_backend_answers_through_the_engine_interface():
         assert out["answers"]["queue"]["choice"] in ("billing", "technical")
         assert out["input_tokens"] > 0
         assert out["batch_rows"] == 3
+        # What /readyz reports has to be what ran: the requested dtype collapses to fp32 on a
+        # device that cannot do it, and the label has to collapse with it.
+        assert engine.dtype_mode in supported_dtypes(torch.device(engine.device))
     finally:
         engine.close()

@@ -164,7 +164,10 @@ cmd_serve() {
     echo "already running as pid $(cat "$PIDFILE")" >&2
     exit 1
   fi
-  setsid nohup "$PY" -m uvicorn server.app:app \
+  # setsid is util-linux and macOS does not ship it; nohup and a background job are enough to
+  # survive this shell there, and `stop` works off the pid file either way.
+  SETSID="$(command -v setsid || true)"
+  $SETSID nohup "$PY" -m uvicorn server.app:app \
       --host "$HOST" --port "$PORT" --workers "$WORKERS" --log-level info \
       > "$LOGS/serve.log" 2>&1 &
   echo $! > "$PIDFILE"
