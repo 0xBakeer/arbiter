@@ -207,7 +207,8 @@ cmd_test() {
 }
 
 usage() {
-  sed -n '2,14p' "$HERE/run.sh" | sed 's/^# \{0,1\}//'
+  # the header comment of this file, up to the first line that is not one
+  awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$HERE/run.sh"
 }
 
 case "${1:-}" in
