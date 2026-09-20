@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>arbiter plays snake</title>
+<meta name="description" content="The Laya decision model plays Snake: one forward pass per move, calibrated probabilities per direction, in tens of milliseconds.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_lib/theme.css">
+</head>
+<body>
+<header class="top wrap">
+  <div class="brand"><a href="../"><span class="wordmark">arbiter plays</span></a><span class="sub">snake</span></div>
+  <span class="spacer"></span>
+  <span class="status" id="status" data-mode="down" aria-live="polite"><span class="dot"></span><span id="statusText">looking for the server</span></span>
+  <a class="back" href="../">All games</a>
+</header>
+
+<main class="game wrap">
+  <section class="board" aria-label="Board">
+    <div class="digits">
+      <div id="score"></div>
+      <div id="length"></div>
+      <div id="best"></div>
+      <span class="grow"></span>
+      <div class="episode"><span class="lbl"><span>Episode</span><b id="stepText">0 / 0</b></span><div class="track"><div class="fill" id="epFill" style="width:0%"></div></div></div>
+    </div>
+    <div class="stage">
+      <canvas id="board" aria-label="Snake board"></canvas>
+      <div class="overlay" id="overlay"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p></div></div>
+    </div>
+  </section>
+  <aside id="panel" aria-label="What the model answered"></aside>
+</main>
+
+<footer class="keys wrap">
+  <button data-key="pause"><kbd>Space</kbd> pause</button>
+  <button data-key="slower"><kbd>&darr;</kbd> slower</button>
+  <button data-key="faster"><kbd>&uarr;</kbd> faster</button>
+  <button data-key="reset"><kbd>R</kbd> reset</button>
+  <button data-key="policy" aria-pressed="true"><kbd>M</kbd> <span id="policyText">model</span></button>
+  <button data-key="shield" aria-pressed="true"><kbd>S</kbd> shield</button>
+  <button data-key="back"><kbd>Q</kbd> all games</button>
+  <span class="badge" id="badge">&mdash;</span>
+</footer>
+
+<script>
+/* Opened from disk in a browser that refuses module scripts on file:// (Chrome): say so, with the fix. */
+if (location.protocol === 'file:') setTimeout(function () {
+  if (window.__arbiterPlays) return;
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('ovTitle').textContent = 'This browser will not run the page from disk';
+  document.getElementById('ovText').innerHTML = 'Chrome blocks module scripts on file:// pages. Serve the folder instead: <b>python3 -m http.server</b> in the repo root, then open <b>/showcase/snake/</b>. Safari and Firefox open this file directly and play the recorded run.';
+  document.getElementById('statusText').textContent = 'Not running';
+}, 1200);
+</script>
+<script type="module">
+'use strict';
+import { mountPanel, mountDigits } from '../_lib/panel.js';
+window.__arbiterPlays = true;
+
+/* =====================================================================================
+   GENERIC PART — every game page keeps this as is: server probe, live/replay runner with
+   sub-tick timing (the model is asked for the NEXT move while the current one animates),
+   keys, digits, pulse, episode bar, panel wiring. Only the block marked SNAKE at the
+   bottom (drawing + which digits to show) changes per game.
+   ===================================================================================== */
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const fromDisk = location.protocol === 'file:';
+const BASE = (params.get('base') || (fromDisk ? 'http://localhost:8010' : location.origin)).replace(/\/+$/, '');
+const SPEEDS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+const REPLAY_URL = '../replay/snake.json';
+const BEST_KEY = 'arbiter.plays.snake.best';
+
+let logic, createClient;
+try {
+  const m = await import('./logic.mjs'); logic = m.default || m;
+  ({ createClient } = await import('../_lib/client.mjs'));
+} catch (e) {
+  overlay(true, 'The game modules did not load', esc(String(e.message || e)));
+  throw e;
+}
+const meta = logic.meta || {};
+const TICK_MS = meta.tick_ms || 160;
+const MAX_STEPS = meta.max_steps || 400;
+
+/* ---- page chrome ---- */
+const panel = mountPanel($('panel'), { meta, questions: logic.questions(logic.init(1)) });
+const digits = {
+  score: mountDigits($('score'), { label: 'Score', digits: 4 }),
+  length: mountDigits($('length'), { label: 'Length', digits: 3 }),
+  best: mountDigits($('best'), { label: 'Best', digits: 4 }),
+};
+const canvas = $('board'), ctx = canvas.getContext('2d');
+let dpr = 1, W = 0, H = 0;
+new ResizeObserver(() => {
+  const r = canvas.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  W = Math.round(r.width * dpr); H = Math.round(r.height * dpr); canvas.width = W; canvas.height = H;
+}).observe(canvas);
+
+function overlay(show, title, text) {
+  $('overlay').classList.toggle('show', !!show);
+  if (title != null) $('ovTitle').textContent = title;
+  if (text != null) $('ovText').innerHTML = text;
+}
+
+/* ---- run state ---- */
+const run = {
+  mode: 'down',            // live | replay | down
+  policy: 'model',         // model | heuristic
+  shield: true,
+  speedIx: 2,
+  paused: false,
+  engine: '—',
+  connected: false,
+  client: null,
+  log: null,               // the recorded run when mode === replay
+  seedCount: 0,
+};
+const ep = { state: null, prev: null, tickStart: 0, pending: null, result: null, dead: false, deadAt: 0, headHot: 0, i: 0 };
+const counters = { decisions: 0, interventions: 0, tokens: 0 };
+const roundtrips = [];     // the last 20 round trips: decisions per second = what the model could sustain
+let best = +(localStorage.getItem(BEST_KEY) || 0);
+digits.best.set(best); digits.best.dim(!best);
+
+const speed = () => SPEEDS[run.speedIx];
+const tickDur = () => TICK_MS / speed();
+
+function paintStatus() {
+  const st = $('status'), badge = $('badge');
+  st.dataset.mode = run.mode === 'live' && !run.connected ? 'down' : run.mode;
+  if (run.mode === 'live') {
+    $('statusText').innerHTML = run.connected ? `Live &middot; <b>${esc(run.engine)}</b>` : 'Live &middot; server not answering, playing the heuristic';
+    badge.className = 'badge live'; badge.innerHTML = `LIVE &middot; <b>${speed()}&times;</b>`;
+  } else if (run.mode === 'replay') {
+    $('statusText').innerHTML = `Recorded run &middot; <b>${speed()}&times;</b>`;
+    badge.className = 'badge'; badge.innerHTML = `RECORDED RUN &middot; <b>${speed()}&times;</b>`;
+  } else {
+    $('statusText').textContent = 'No server and no recording';
+    badge.className = 'badge'; badge.textContent = 'OFFLINE';
+  }
+  $('policyText').textContent = run.policy;
+  const pol = document.querySelector('[data-key="policy"]'), sh = document.querySelector('[data-key="shield"]');
+  pol.setAttribute('aria-pressed', String(run.policy === 'model')); sh.setAttribute('aria-pressed', String(run.shield));
+  pol.disabled = sh.disabled = run.mode === 'replay';
+  pol.title = sh.title = run.mode === 'replay' ? 'Not available in a recorded run' : '';
+  panel.setStatus({ mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield });
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---- the cobalt pulse: head -> panel on every model call ---- */
+let pulses = 0;
+function firePulse() {
+  if (pulses >= 4 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const from = headPixel(ep.state); if (!from) return;
+  const cr = canvas.getBoundingClientRect();
+  const target = document.querySelector('#panel .sec') || $('panel');
+  const tr = target.getBoundingClientRect();
+  const x0 = cr.left + from[0], y0 = cr.top + from[1];
+  const x1 = tr.left + 6, y1 = tr.top + 8;
+  const p = document.createElement('i'); p.className = 'pulse'; document.body.appendChild(p); pulses++;
+  const anim = p.animate([
+    { transform: `translate(${x0}px, ${y0}px) scale(.6)`, opacity: 0 },
+    { transform: `translate(${x0}px, ${y0}px) scale(1)`, opacity: 1, offset: .12 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1)`, opacity: .9, offset: .92 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1.6)`, opacity: 0 },
+  ], { duration: Math.min(420, Math.max(220, tickDur() * .9)), easing: 'cubic-bezier(.3,.6,.2,1)' });
+  anim.onfinish = () => { p.remove(); pulses--; panel.flash(); };
+}
+
+/* ---- asking for the next move ---- */
+async function askLive(state) {
+  const qs = logic.questions(state);
+  firePulse();
+  let res = null, err = null;
+  try { res = await run.client.ask(logic.encode(state), qs); }
+  catch (e) { err = e; }
+  const modelDecision = res ? logic.decide(state, res.answers) : null;
+  const heuristicAction = logic.heuristic(state);
+  const decision = run.policy === 'model' && modelDecision
+    ? modelDecision
+    : { action: heuristicAction, extras: { ...(modelDecision && modelDecision.extras), model_action: modelDecision ? modelDecision.action : null } };
+  if (res) {
+    const engine = res.routing && res.routing.model ? 'laya-' + res.routing.model : (res.model || run.engine);
+    if (!run.connected || engine !== run.engine) { run.connected = true; run.engine = engine; paintStatus(); }
+  } else if (run.connected) { run.connected = false; paintStatus(); }
+  if (res) { roundtrips.push(res.roundtrip_ms); if (roundtrips.length > 20) roundtrips.shift(); }
+  const dps = roundtrips.length ? roundtrips.length * 1000 / roundtrips.reduce((a, b) => a + b, 0) : null;
+  return {
+    qs, answers: res ? res.answers : null, decision,
+    timing: res ? { inference_ms: res.inference_ms != null ? res.inference_ms : res.latency_ms, roundtrip_ms: res.roundtrip_ms, decisions_per_s: dps } : {},
+    tokens: res && res.usage ? (res.usage.output_tokens || 0) : 0, error: err,
+  };
+}
+// A recorded tick (see _lib/recorder.mjs): { action, model_action, intervened, reason, extras, answers, timing, ... }.
+// The board is rebuilt from the seed with logic.step, exactly like a live run.
+function askReplay(state) {
+  const t = run.log.ticks[ep.i];
+  if (!t) return Promise.resolve(null);
+  const modelAction = t.model_action != null ? t.model_action : t.action;
+  return Promise.resolve({
+    qs: logic.questions(state), answers: t.answers || null,
+    decision: { action: modelAction, extras: t.extras || {} },
+    recordedShield: { intervened: !!t.intervened, reason: t.reason || '', action: t.action },
+    recordedAction: t.action, timing: t.timing || {}, tokens: (t.usage && t.usage.output_tokens) || 0,
+  });
+}
+const ask = state => run.mode === 'replay' ? askReplay(state) : askLive(state);
+
+/* ---- applying a decision = one tick ---- */
+function apply(res, now) {
+  const s = ep.state;
+  let action = res.decision.action, sh = { intervened: false, reason: '', action };
+  if (run.mode === 'replay') { sh = res.recordedShield; action = res.recordedAction; }
+  else if (run.shield) { sh = logic.shield(s, action, res.decision.extras || {}); action = sh.action; }
+  const out = logic.step(s, action);
+  ep.prev = s; ep.state = out.state; ep.tickStart = now; ep.headHot = 1; ep.i++;
+  counters.decisions++; if (sh.intervened) counters.interventions++; counters.tokens += res.tokens || 0;
+  panel.update({
+    questions: res.qs, answers: res.answers || {}, decision: res.decision, shield: sh,
+    timing: res.timing, counters: { ...counters },
+    status: { mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield },
+  });
+  paintDigits();
+  if (out.done || (run.mode === 'replay' && ep.i >= run.log.ticks.length)) {
+    ep.dead = true; ep.deadAt = now; ep.pending = null; ep.result = null;
+    if (!ep.state.alive) digits.score.hot(false);
+    return;
+  }
+  ep.pending = ask(ep.state).then(r => { ep.result = r; });
+}
+
+function paintDigits() {
+  const sum = logic.summary(ep.state);
+  digits.score.set(sum.score);
+  digits.length.set(sum.length != null ? sum.length : (ep.state.snake ? ep.state.snake.length : 0));
+  if (sum.score > best) { best = sum.score; localStorage.setItem(BEST_KEY, String(best)); digits.best.set(best); digits.best.dim(false); digits.best.hot(true); }
+  const total = run.mode === 'replay' ? run.log.ticks.length : MAX_STEPS;
+  const at = run.mode === 'replay' ? ep.i : sum.steps;
+  $('stepText').textContent = `${at} / ${total}`;
+  $('epFill').style.width = Math.min(100, at / total * 100).toFixed(1) + '%';
+}
+
+function startEpisode(now) {
+  const seed = run.mode === 'replay' ? (run.log.seed != null ? run.log.seed : 1) : ((Date.now() + run.seedCount++) % 1e6) + 1;
+  ep.state = logic.init(seed);
+  ep.prev = ep.state; ep.tickStart = now; ep.dead = false; ep.i = 0; ep.headHot = 0; ep.result = null;
+  digits.best.hot(false);
+  paintDigits();
+  ep.pending = ask(ep.state).then(r => { ep.result = r; });
+}
+
+/* ---- the frame loop with sub-tick timing ---- */
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!ep.state) return;
+  const dt = now - last; last = now;
+  if (ep.dead) {
+    render(ep.state, ep.state, 1, { dead: true, deadT: (now - ep.deadAt) / 1000, paused: run.paused });
+    if (!run.paused && now - ep.deadAt > 1500) { panel.reset(); startEpisode(now); }
+    return;
+  }
+  if (run.paused) { render(ep.prev, ep.state, 1, { paused: true }); return; }
+  let t = (now - ep.tickStart) / tickDur();
+  if (t >= 1) {
+    if (ep.result) { const r = ep.result; ep.result = null; apply(r, now); t = 0; }
+    else if (ep.pending === null && run.mode === 'replay') { ep.dead = true; ep.deadAt = now; }
+    else t = 1;                                   // the answer is still in flight: hold at the end of the glide
+  }
+  ep.headHot = Math.max(0, ep.headHot - dt / 320);
+  render(ep.prev, ep.state, t, { headHot: ep.headHot });
+}
+
+/* ---- keys ---- */
+const actions = {
+  pause() { run.paused = !run.paused; overlay(run.paused, 'Paused', 'Press <kbd>Space</kbd> to continue'); if (!run.paused) { ep.tickStart = performance.now(); if (ep.dead) ep.deadAt = performance.now(); } },
+  faster() { run.speedIx = Math.min(SPEEDS.length - 1, run.speedIx + 1); paintStatus(); },
+  slower() { run.speedIx = Math.max(0, run.speedIx - 1); paintStatus(); },
+  reset() { counters.decisions = counters.interventions = counters.tokens = 0; roundtrips.length = 0; panel.reset(); startEpisode(performance.now()); if (run.paused) actions.pause(); },
+  policy() { if (run.mode === 'replay') return; run.policy = run.policy === 'model' ? 'heuristic' : 'model'; paintStatus(); },
+  shield() { if (run.mode === 'replay') return; run.shield = !run.shield; paintStatus(); },
+  back() { location.href = '../'; },
+};
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = { ' ': 'pause', ArrowUp: 'faster', ArrowDown: 'slower', r: 'reset', R: 'reset', m: 'policy', M: 'policy', s: 'shield', S: 'shield', q: 'back', Q: 'back' }[e.key];
+  if (!k) return; e.preventDefault(); actions[k]();
+});
+document.querySelectorAll('footer.keys button').forEach(b => b.addEventListener('click', () => actions[b.dataset.key]()));
+
+/* ---- boot: live if the server answers, otherwise the recorded run ---- */
+async function boot() {
+  let ready = false;
+  if (!(params.get('mode') === 'replay')) {
+    try {
+      const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 2500);
+      const r = await fetch(BASE + '/readyz', { cache: 'no-store', signal: ctrl.signal }); clearTimeout(to);
+      const j = await r.json().catch(() => ({}));
+      ready = r.ok && j.status === 'ready';
+    } catch (e) { ready = false; }
+  }
+  if (ready) {
+    run.mode = 'live'; run.connected = true;
+    run.client = createClient({ baseUrl: BASE, model: params.get('model') || 'auto' });
+  } else {
+    try {
+      const r = await fetch(REPLAY_URL, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      run.log = await r.json();
+      if (!Array.isArray(run.log.ticks) || !run.log.ticks.length) throw new Error('empty recording');
+      run.mode = 'replay'; run.engine = run.log.engine || run.log.model || 'recorded';
+    } catch (e) {
+      run.mode = 'down';
+      overlay(true, 'Nothing to play', `No arbiter server at <b>${esc(BASE)}</b> and no recording at <b>${esc(REPLAY_URL)}</b>. Start the server (<b>./run.sh</b>) and reload, or add <b>?base=http://localhost:8010</b> to the URL.`);
+      paintStatus(); return;
+    }
+  }
+  paintStatus();
+  startEpisode(performance.now());
+  requestAnimationFrame(frame);
+  if (run.mode === 'live') setInterval(async () => {
+    try { const r = await fetch(BASE + '/readyz', { cache: 'no-store' }); const j = await r.json(); const ok = r.ok && j.status === 'ready'; if (ok !== run.connected) { run.connected = ok; paintStatus(); } }
+    catch (e) { if (run.connected) { run.connected = false; paintStatus(); } }
+  }, 10000);
+}
+
+/* =====================================================================================
+   SNAKE — the only game-specific part of the page: where the head is (for the pulse)
+   and how the board is drawn. render(prev, cur, t, fx) is called every frame with
+   t in [0,1] = progress of the glide from the previous state to the current one.
+   ===================================================================================== */
+const COBALT = '#5583FF', HEAD = '#7DA0FF', BRIGHT = '#E9EDF7', ORANGE = '#FF8C33', DANGER = '#F0605C';
+const cellGeom = () => { const n = ep.state ? ep.state.w : 12; const pad = Math.round(10 * dpr); const c = (Math.min(W, H) - pad * 2) / n; return { n, pad, c }; };
+const xy = p => Array.isArray(p) ? p : [p.x, p.y];       // cells are {x, y} in logic.mjs
+function headPixel(state) {
+  if (!state || !W) return null;
+  const { pad, c } = cellGeom(); const [x, y] = xy(state.snake[0]);
+  return [(pad + (x + .5) * c) / dpr, (pad + (y + .5) * c) / dpr];
+}
+const lerp = (a, b, t) => a + (b - a) * t;
+function render(prev, cur, t, fx = {}) {
+  if (!W) return;
+  const { n, pad, c } = cellGeom();
+  ctx.clearRect(0, 0, W, H);
+  // grid: a dot at every cell corner
+  ctx.fillStyle = '#2B3758';
+  const d = Math.max(1, dpr);
+  for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) ctx.fillRect(Math.round(pad + i * c) - d / 2, Math.round(pad + j * c) - d / 2, d, d);
+  const px = (x, y) => [pad + (x + .5) * c, pad + (y + .5) * c];
+  // food: the one orange thing on the board
+  if (cur.food) {
+    const [fx0, fy0] = px(...xy(cur.food)); const r = c * .22;
+    ctx.save(); ctx.shadowColor = 'rgba(255,140,51,.7)'; ctx.shadowBlur = 10 * dpr; ctx.fillStyle = ORANGE;
+    ctx.beginPath(); ctx.roundRect(fx0 - r, fy0 - r, r * 2, r * 2, r * .35); ctx.fill(); ctx.restore();
+  }
+  // snake: glide every segment from where it was to where it is
+  const pts = cur.snake.map((cell, i) => { const [x, y] = xy(cell); const p = xy(prev.snake[Math.min(i, prev.snake.length - 1)]); return px(lerp(p[0], x, t), lerp(p[1], y, t)); });
+  const dead = fx.dead && !cur.alive;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  if (pts.length > 1) {
+    ctx.strokeStyle = dead ? DANGER : COBALT; ctx.lineWidth = c * .5; ctx.globalAlpha = .85;
+    ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+    // the tail tip, a shade dimmer so the direction of travel reads at a glance
+    const k = pts.length - 1; ctx.strokeStyle = '#0E1528'; ctx.globalAlpha = .45; ctx.lineWidth = c * .5;
+    ctx.beginPath(); ctx.moveTo(pts[k][0], pts[k][1]); ctx.lineTo(lerp(pts[k][0], pts[k - 1][0], .5), lerp(pts[k][1], pts[k - 1][1], .5)); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // head: a rounded square that brightens on each decision
+  const hot = fx.headHot || 0; const [hx, hy] = pts[0]; const hs = c * .36;
+  ctx.save();
+  if (hot > 0) { ctx.shadowColor = 'rgba(125,160,255,' + (hot * .9).toFixed(2) + ')'; ctx.shadowBlur = 16 * dpr * hot; }
+  ctx.fillStyle = dead ? DANGER : mix(HEAD, BRIGHT, hot);
+  ctx.beginPath(); ctx.roundRect(hx - hs, hy - hs, hs * 2, hs * 2, hs * .35); ctx.fill(); ctx.restore();
+  if (dead && fx.deadT < .3) { ctx.fillStyle = `rgba(240,96,92,${(.35 * (1 - fx.deadT / .3)).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
+  if (fx.paused) { ctx.fillStyle = 'rgba(10,15,30,.45)'; ctx.fillRect(0, 0, W, H); }
+}
+function mix(a, b, t) {
+  const p = h => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+  const [r1, g1, b1] = p(a), [r2, g2, b2] = p(b);
+  return `rgb(${Math.round(lerp(r1, r2, t))},${Math.round(lerp(g1, g2, t))},${Math.round(lerp(b1, b2, t))})`;
+}
+
+boot();
+</script>
+</body>
+</html>
