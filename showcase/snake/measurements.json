@@ -1,0 +1,318 @@
+{
+  "game": "snake",
+  "generated_at": "2026-09-20T10:37:04.388Z",
+  "server": {
+    "base": "http://localhost:8010",
+    "model": "auto",
+    "device": "mps",
+    "mode": "eager",
+    "dtype": "fp32"
+  },
+  "tick_ms": 120,
+  "questions_per_tick": 3,
+  "wall_seconds": 259.7,
+  "policies": {
+    "model": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 0.25,
+        "median": 0,
+        "max": 2,
+        "all": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 14.6,
+        "median": 9,
+        "max": 44
+      },
+      "decisions": {
+        "total": 292,
+        "per_episode": 14.6
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 82064,
+      "inference_ms": {
+        "n": 292,
+        "p50": 57.6,
+        "p95": 62.5,
+        "max": 158.5
+      },
+      "roundtrip_ms": {
+        "n": 292,
+        "p50": 60.4,
+        "p95": 66.3,
+        "max": 162.2
+      },
+      "decisions_per_s": 16.6,
+      "throughput_per_s": 16.1,
+      "calibration": {
+        "dead_end": {
+          "type": "noul",
+          "n": 292,
+          "positives": 20,
+          "mean_when_true": 0.55,
+          "mean_when_false": 0.54,
+          "auroc": 0.586,
+          "baseline_auroc": null,
+          "table": {
+            "true_positive": 20,
+            "false_positive": 265,
+            "false_negative": 0,
+            "true_negative": 7
+          }
+        },
+        "food_reachable": {
+          "type": "noul",
+          "n": 292,
+          "positives": 292,
+          "mean_when_true": 0.46,
+          "mean_when_false": null,
+          "auroc": null,
+          "baseline_auroc": null,
+          "table": {
+            "true_positive": 1,
+            "false_positive": 0,
+            "false_negative": 291,
+            "true_negative": 0
+          }
+        }
+      }
+    },
+    "model+shield": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 1.35,
+        "median": 1,
+        "max": 5,
+        "all": [
+          2,
+          1,
+          2,
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          5,
+          0,
+          1,
+          2,
+          3,
+          2,
+          0,
+          3,
+          2,
+          1
+        ]
+      },
+      "steps": {
+        "mean": 174.95,
+        "median": 170,
+        "max": 250
+      },
+      "decisions": {
+        "total": 3499,
+        "per_episode": 174.95
+      },
+      "shield_interventions": {
+        "total": 247,
+        "per_episode": 12.35
+      },
+      "input_tokens": 982619,
+      "inference_ms": {
+        "n": 3499,
+        "p50": 61.6,
+        "p95": 115.9,
+        "max": 148.5
+      },
+      "roundtrip_ms": {
+        "n": 3499,
+        "p50": 63.9,
+        "p95": 118.3,
+        "max": 151.8
+      },
+      "decisions_per_s": 15.7,
+      "throughput_per_s": 14.7,
+      "calibration": {
+        "dead_end": {
+          "type": "noul",
+          "n": 3499,
+          "positives": 247,
+          "mean_when_true": 0.55,
+          "mean_when_false": 0.54,
+          "auroc": 0.528,
+          "baseline_auroc": null,
+          "table": {
+            "true_positive": 241,
+            "false_positive": 3169,
+            "false_negative": 6,
+            "true_negative": 83
+          }
+        },
+        "food_reachable": {
+          "type": "noul",
+          "n": 3499,
+          "positives": 3499,
+          "mean_when_true": 0.48,
+          "mean_when_false": null,
+          "auroc": null,
+          "baseline_auroc": null,
+          "table": {
+            "true_positive": 742,
+            "false_positive": 0,
+            "false_negative": 2757,
+            "true_negative": 0
+          }
+        }
+      }
+    },
+    "random+shield": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 1.2,
+        "median": 1,
+        "max": 5,
+        "all": [
+          1,
+          1,
+          0,
+          0,
+          4,
+          0,
+          1,
+          2,
+          2,
+          0,
+          3,
+          1,
+          1,
+          5,
+          0,
+          1,
+          1,
+          0,
+          1,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 196.7,
+        "median": 179,
+        "max": 250
+      },
+      "decisions": {
+        "total": 3934,
+        "per_episode": 196.7
+      },
+      "shield_interventions": {
+        "total": 335,
+        "per_episode": 16.75
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    },
+    "heuristic+shield": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 26.45,
+        "median": 26,
+        "max": 32,
+        "all": [
+          24,
+          24,
+          24,
+          26,
+          26,
+          26,
+          25,
+          26,
+          24,
+          23,
+          31,
+          31,
+          30,
+          26,
+          26,
+          24,
+          32,
+          26,
+          25,
+          30
+        ]
+      },
+      "steps": {
+        "mean": 249.4,
+        "median": 250,
+        "max": 250
+      },
+      "decisions": {
+        "total": 4988,
+        "per_episode": 249.4
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    }
+  }
+}

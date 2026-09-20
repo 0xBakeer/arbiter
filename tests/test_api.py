@@ -337,3 +337,64 @@ def test_metrics_counts_requests_questions_and_batches():
     assert "arbiter_request_latency_seconds_count 2" in text
     assert "arbiter_batch_rows_count 1" in text
     assert "arbiter_queue_depth 0" in text
+
+
+# --------------------------------------------------------------------- the showcase
+
+def test_showcase_index_lists_the_games():
+    c, _ = client()
+    r = c.get("/showcase/")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    for game in ("snake", "hopper", "crossing", "paddle", "mines", "dungeon"):
+        assert game in r.text
+
+
+def test_showcase_redirects_the_bare_path():
+    c, _ = client()
+    r = c.get("/showcase", follow_redirects=False)
+    assert r.status_code == 307
+    assert r.headers["location"] == "/showcase/"
+
+
+def test_showcase_serves_modules_as_javascript():
+    c, _ = client()
+    for path in ("_lib/harness.mjs", "_lib/client.mjs", "_lib/recorder.mjs", "snake/logic.mjs"):
+        r = c.get("/showcase/" + path)
+        assert r.status_code == 200, path
+        # a module served as application/octet-stream is a module the browser will not run
+        assert r.headers["content-type"].startswith("text/javascript"), path
+        assert "export" in r.text
+
+
+def test_showcase_serves_the_recorded_runs_as_json():
+    c, _ = client()
+    r = c.get("/showcase/replay/snake.json")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/json")
+    assert r.json()["game"] == "snake"
+
+
+def test_showcase_serves_a_game_directory_as_its_page():
+    c, _ = client()
+    r = c.get("/showcase/hopper/")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+
+
+def test_showcase_404s_what_is_not_there():
+    c, _ = client()
+    assert c.get("/showcase/nope/logic.mjs").status_code == 404
+    assert c.get("/showcase/snake/nope.mjs").json()["error"]["type"] == "not_found_error"
+
+
+@pytest.mark.parametrize("path", ["../server/app.py", "..%2Fserver%2Fapp.py", "snake/../../run.sh"])
+def test_showcase_refuses_to_leave_its_directory(path):
+    c, _ = client()
+    assert c.get("/showcase/" + path).status_code == 404
+
+
+def test_the_showcase_is_not_in_the_openapi_schema():
+    c, _ = client()
+    paths = c.get("/openapi.json").json()["paths"]
+    assert not [p for p in paths if p.startswith("/showcase")]

@@ -1,0 +1,306 @@
+{
+  "game": "crossing",
+  "generated_at": "2026-09-20T10:41:49.295Z",
+  "server": {
+    "base": "http://localhost:8010",
+    "model": "auto",
+    "device": "mps",
+    "mode": "eager",
+    "dtype": "fp32"
+  },
+  "tick_ms": 150,
+  "questions_per_tick": 2,
+  "wall_seconds": 182.3,
+  "policies": {
+    "model": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 0,
+        "median": 0,
+        "max": 0,
+        "all": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 8.15,
+        "median": 7.5,
+        "max": 15
+      },
+      "decisions": {
+        "total": 163,
+        "per_episode": 8.15
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 33662,
+      "inference_ms": {
+        "n": 163,
+        "p50": 50.2,
+        "p95": 54.7,
+        "max": 58.7
+      },
+      "roundtrip_ms": {
+        "n": 163,
+        "p50": 52.7,
+        "p95": 57.3,
+        "max": 61.4
+      },
+      "decisions_per_s": 19,
+      "throughput_per_s": 18.9,
+      "calibration": {
+        "hit_risk": {
+          "type": "score",
+          "n": 163,
+          "levels": 3,
+          "auroc_top_level": 0.661,
+          "exact_match": 0.577,
+          "matrix": [
+            [
+              94,
+              0,
+              0
+            ],
+            [
+              49,
+              0,
+              0
+            ],
+            [
+              20,
+              0,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    "model+shield": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 5.6,
+        "median": 1.5,
+        "max": 20,
+        "all": [
+          13,
+          20,
+          0,
+          0,
+          0,
+          3,
+          0,
+          13,
+          17,
+          0,
+          15,
+          0,
+          2,
+          0,
+          1,
+          3,
+          14,
+          0,
+          0,
+          11
+        ]
+      },
+      "steps": {
+        "mean": 144.85,
+        "median": 163.5,
+        "max": 250
+      },
+      "decisions": {
+        "total": 2897,
+        "per_episode": 144.85
+      },
+      "shield_interventions": {
+        "total": 550,
+        "per_episode": 27.5
+      },
+      "input_tokens": 597474,
+      "inference_ms": {
+        "n": 2897,
+        "p50": 58.2,
+        "p95": 66,
+        "max": 86.2
+      },
+      "roundtrip_ms": {
+        "n": 2897,
+        "p50": 60.9,
+        "p95": 69,
+        "max": 88.6
+      },
+      "decisions_per_s": 16.4,
+      "throughput_per_s": 16.7,
+      "calibration": {
+        "hit_risk": {
+          "type": "score",
+          "n": 2897,
+          "levels": 3,
+          "auroc_top_level": 0.38,
+          "exact_match": 0.384,
+          "matrix": [
+            [
+              736,
+              523,
+              80
+            ],
+            [
+              602,
+              365,
+              31
+            ],
+            [
+              413,
+              137,
+              10
+            ]
+          ]
+        }
+      }
+    },
+    "random+shield": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 0.6,
+        "median": 0,
+        "max": 3,
+        "all": [
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          3,
+          0,
+          0,
+          0,
+          3,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 114.45,
+        "median": 70,
+        "max": 250
+      },
+      "decisions": {
+        "total": 2289,
+        "per_episode": 114.45
+      },
+      "shield_interventions": {
+        "total": 601,
+        "per_episode": 30.05
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    },
+    "heuristic+shield": {
+      "episodes": 20,
+      "max_steps": 250,
+      "score": {
+        "mean": 7.25,
+        "median": 1,
+        "max": 21,
+        "all": [
+          13,
+          21,
+          14,
+          0,
+          0,
+          13,
+          14,
+          21,
+          20,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          14,
+          1,
+          0,
+          13
+        ]
+      },
+      "steps": {
+        "mean": 133.05,
+        "median": 140.5,
+        "max": 250
+      },
+      "decisions": {
+        "total": 2661,
+        "per_episode": 133.05
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    }
+  }
+}

@@ -1,0 +1,212 @@
+{
+  "game": "mines",
+  "generated_at": "2026-09-20T10:52:40.961Z",
+  "server": {
+    "base": "http://localhost:8010",
+    "model": "auto",
+    "device": "mps",
+    "mode": "eager",
+    "dtype": "fp32"
+  },
+  "tick_ms": 250,
+  "questions_per_tick": 12,
+  "wall_seconds": 13.9,
+  "policies": {
+    "model": {
+      "episodes": 20,
+      "max_steps": 60,
+      "score": {
+        "mean": 38.4,
+        "median": 40.5,
+        "max": 54,
+        "all": [
+          45,
+          30,
+          46,
+          26,
+          31,
+          48,
+          13,
+          52,
+          33,
+          53,
+          54,
+          40,
+          47,
+          41,
+          25,
+          47,
+          34,
+          15,
+          52,
+          36
+        ]
+      },
+      "steps": {
+        "mean": 4.95,
+        "median": 3,
+        "max": 15
+      },
+      "decisions": {
+        "total": 99,
+        "per_episode": 4.95
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 113856,
+      "inference_ms": {
+        "n": 99,
+        "p50": 137.3,
+        "p95": 137.8,
+        "max": 177.6
+      },
+      "roundtrip_ms": {
+        "n": 99,
+        "p50": 139.5,
+        "p95": 140.2,
+        "max": 181.4
+      },
+      "decisions_per_s": 7.2,
+      "throughput_per_s": 7.2,
+      "calibration": {
+        "cell_is_safe": {
+          "type": "noul",
+          "n": 1186,
+          "positives": 495,
+          "mean_when_true": 0.47,
+          "mean_when_false": 0.44,
+          "auroc": 0.804,
+          "baseline_auroc": 0.898,
+          "table": {
+            "true_positive": 70,
+            "false_positive": 18,
+            "false_negative": 425,
+            "true_negative": 673
+          }
+        }
+      }
+    },
+    "random+shield": {
+      "episodes": 20,
+      "max_steps": 60,
+      "score": {
+        "mean": 32.65,
+        "median": 33.5,
+        "max": 47,
+        "all": [
+          47,
+          28,
+          35,
+          28,
+          30,
+          42,
+          12,
+          34,
+          33,
+          25,
+          26,
+          40,
+          46,
+          40,
+          25,
+          45,
+          35,
+          17,
+          34,
+          31
+        ]
+      },
+      "steps": {
+        "mean": 2.25,
+        "median": 2,
+        "max": 5
+      },
+      "decisions": {
+        "total": 45,
+        "per_episode": 2.25
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    },
+    "heuristic+shield": {
+      "episodes": 20,
+      "max_steps": 60,
+      "score": {
+        "mean": 50.05,
+        "median": 54,
+        "max": 54,
+        "all": [
+          54,
+          37,
+          54,
+          54,
+          49,
+          54,
+          54,
+          54,
+          42,
+          54,
+          54,
+          54,
+          54,
+          54,
+          54,
+          48,
+          54,
+          15,
+          54,
+          54
+        ]
+      },
+      "steps": {
+        "mean": 13.75,
+        "median": 12,
+        "max": 28
+      },
+      "decisions": {
+        "total": 275,
+        "per_episode": 13.75
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    }
+  }
+}

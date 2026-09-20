@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>arbiter plays hopper</title>
+<meta name="description" content="The Laya decision model flies a Flappy-style bird: one noul per tick, no shield, tens of milliseconds per decision.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_lib/theme.css">
+</head>
+<body>
+<header class="top wrap">
+  <div class="brand"><a href="../"><span class="wordmark">arbiter plays</span></a><span class="sub">hopper</span></div>
+  <span class="spacer"></span>
+  <a class="back" href="../">All games</a>
+</header>
+
+<main class="game wrap">
+  <section class="board" aria-label="Board">
+    <div class="stage" id="stage">
+      <canvas id="board" aria-label="Hopper board"></canvas>
+      <div class="hud" aria-live="off">
+        <div class="corner l">
+          <div class="stat big"><b id="hudScore">0</b><span>score</span></div>
+          <div class="stat"><b id="hudSecond">0</b><span>height</span></div>
+        </div>
+        <div class="corner r">
+          <div class="stat best" id="hudBestStat"><b id="hudBest">0</b><span>best</span></div>
+          <div class="ep" title="Episode progress"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="fg" id="ring" cx="18" cy="18" r="15"/></svg><small id="stepText">0 / 0</small></div>
+        </div>
+      </div>
+      <div class="overlay" id="overlay"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p></div></div>
+    </div>
+  </section>
+  <aside id="panel" aria-label="What the model answered"></aside>
+</main>
+
+<footer class="keys wrap">
+  <span class="chip" id="status" data-mode="down" aria-live="polite"><span class="dot"></span><span id="statusText">looking for the server</span></span>
+  <button data-key="pause"><kbd>Space</kbd> pause</button>
+  <button data-key="slower"><kbd>&darr;</kbd> slower</button>
+  <button data-key="faster"><kbd>&uarr;</kbd> faster</button>
+  <button data-key="reset"><kbd>R</kbd> reset</button>
+  <button data-key="policy" aria-pressed="true"><kbd>M</kbd> <span id="policyText">model</span></button>
+  <button data-key="back"><kbd>Q</kbd> all games</button>
+  <span class="chip speed" id="badge" title="Speed">1&times;</span>
+</footer>
+
+<script>
+/* Opened from disk in a browser that refuses module scripts on file:// (Chrome): say so, with the fix. */
+if (location.protocol === 'file:') setTimeout(function () {
+  if (window.__arbiterPlays) return;
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('ovTitle').textContent = 'This browser will not run the page from disk';
+  document.getElementById('ovText').innerHTML = 'Chrome blocks module scripts on file:// pages. Serve the folder instead: <b>python3 -m http.server</b> in the repo root, then open <b>/showcase/hopper/</b>. Safari and Firefox open this file directly and play the recorded run.';
+  document.getElementById('statusText').textContent = 'Not running';
+}, 1200);
+</script>
+<script type="module">
+'use strict';
+import { mountPanel } from '../_lib/panel.js';
+import { drawDecisionHalo, drawBoardDepth, drawDangerVignette, createParticles, createShake, countUp, ringProgress, COLORS } from '../_lib/board.js';
+window.__arbiterPlays = true;
+
+/* =====================================================================================
+   GENERIC PART — every game page keeps this as is: server probe, live/replay runner with
+   sub-tick timing (the model is asked for the NEXT move while the current one animates),
+   keys, HUD, pulse, panel wiring. The block marked HOPPER at the bottom (drawing + the
+   three hooks onEpisodeStart / onApplied / onNextDecision) changes per game.
+   ===================================================================================== */
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const fromDisk = location.protocol === 'file:';
+const BASE = (params.get('base') || (fromDisk ? 'http://localhost:8010' : location.origin)).replace(/\/+$/, '');
+const SPEEDS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+const REPLAY_URL = '../replay/hopper.json';
+const BEST_KEY = 'arbiter.plays.hopper.best';
+
+let logic, createClient;
+try {
+  const m = await import('./logic.mjs'); logic = m.default || m;
+  ({ createClient } = await import('../_lib/client.mjs'));
+} catch (e) {
+  overlay(true, 'The game modules did not load', esc(String(e.message || e)));
+  throw e;
+}
+const meta = logic.meta || {};
+const TICK_MS = meta.tick_ms || 160;
+const MAX_STEPS = meta.max_steps || 400;
+
+/* ---- page chrome ---- */
+const panel = mountPanel($('panel'), { meta, questions: logic.questions(logic.init(1)), strip: false });
+const canvas = $('board'), ctx = canvas.getContext('2d');
+let dpr = 1, W = 0, H = 0;
+new ResizeObserver(() => {
+  const r = canvas.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  W = Math.round(r.width * dpr); H = Math.round(r.height * dpr); canvas.width = W; canvas.height = H;
+}).observe(canvas);
+
+function overlay(show, title, text) {
+  $('overlay').classList.toggle('show', !!show);
+  if (title != null) $('ovTitle').textContent = title;
+  if (text != null) $('ovText').innerHTML = text;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---- run state ---- */
+const run = {
+  mode: 'down',            // live | replay | down
+  policy: 'model',         // model | heuristic
+  shield: true,
+  speedIx: 2,
+  paused: false,
+  engine: '—',
+  connected: false,
+  client: null,
+  log: null,               // the recorded run when mode === replay
+  seedCount: 0,
+};
+const ep = { state: null, prev: null, tickStart: 0, pending: null, result: null, dead: false, deadAt: 0, headHot: 0, i: 0, bornAt: 0 };
+const counters = { decisions: 0, interventions: 0, tokens: 0 };
+const roundtrips = [];     // the last 20 round trips: decisions per second = what the model could sustain
+let best = +(localStorage.getItem(BEST_KEY) || 0);
+$('hudBest').textContent = String(best);
+
+const speed = () => SPEEDS[run.speedIx];
+const tickDur = () => TICK_MS / speed();
+
+function paintStatus() {
+  const st = $('status');
+  st.dataset.mode = run.mode === 'live' && !run.connected ? 'down' : run.mode;
+  if (run.mode === 'live') $('statusText').innerHTML = run.connected ? `Live &middot; <b>${esc(run.engine)}</b>` : 'Live &middot; server not answering, playing the heuristic';
+  else if (run.mode === 'replay') $('statusText').innerHTML = `Recorded run &middot; <b>${esc(run.engine)}</b>`;
+  else $('statusText').textContent = 'No server and no recording';
+  $('badge').textContent = speed() + '×';
+  $('policyText').textContent = run.policy;
+  const pol = document.querySelector('[data-key="policy"]');
+  pol.setAttribute('aria-pressed', String(run.policy === 'model'));
+  pol.disabled = run.mode === 'replay';
+  pol.title = run.mode === 'replay' ? 'Not available in a recorded run' : '';
+  panel.setStatus({ mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield });
+}
+
+/* ---- the cobalt pulse: actor -> panel on every model call ---- */
+let pulses = 0;
+function firePulse() {
+  if (pulses >= 4 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const from = actorPixel(ep.state); if (!from) return;
+  const cr = canvas.getBoundingClientRect();
+  const target = document.querySelector('#panel .sec') || $('panel');
+  const tr = target.getBoundingClientRect();
+  const x0 = cr.left + from[0], y0 = cr.top + from[1];
+  const x1 = tr.left + 6, y1 = tr.top + 8;
+  const p = document.createElement('i'); p.className = 'pulse'; document.body.appendChild(p); pulses++;
+  const anim = p.animate([
+    { transform: `translate(${x0}px, ${y0}px) scale(.6)`, opacity: 0 },
+    { transform: `translate(${x0}px, ${y0}px) scale(1)`, opacity: 1, offset: .12 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1)`, opacity: .9, offset: .92 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1.6)`, opacity: 0 },
+  ], { duration: Math.min(420, Math.max(220, tickDur() * .9)), easing: 'cubic-bezier(.3,.6,.2,1)' });
+  anim.onfinish = () => { p.remove(); pulses--; panel.flash(); };
+}
+
+/* ---- asking for the next move ---- */
+async function askLive(state) {
+  const qs = logic.questions(state);
+  firePulse();
+  let res = null, err = null;
+  try { res = await run.client.ask(logic.encode(state), qs); }
+  catch (e) { err = e; }
+  const modelDecision = res ? logic.decide(state, res.answers) : null;
+  const heuristicAction = logic.heuristic(state);
+  const decision = run.policy === 'model' && modelDecision
+    ? modelDecision
+    : { action: heuristicAction, extras: { ...(modelDecision && modelDecision.extras), model_action: modelDecision ? modelDecision.action : null } };
+  if (res) {
+    const engine = res.routing && res.routing.model ? 'laya-' + res.routing.model : (res.model || run.engine);
+    if (!run.connected || engine !== run.engine) { run.connected = true; run.engine = engine; paintStatus(); }
+  } else if (run.connected) { run.connected = false; paintStatus(); }
+  if (res) { roundtrips.push(res.roundtrip_ms); if (roundtrips.length > 20) roundtrips.shift(); }
+  const dps = roundtrips.length ? roundtrips.length * 1000 / roundtrips.reduce((a, b) => a + b, 0) : null;
+  return {
+    qs, answers: res ? res.answers : null, decision,
+    timing: res ? { inference_ms: res.inference_ms != null ? res.inference_ms : res.latency_ms, roundtrip_ms: res.roundtrip_ms, decisions_per_s: dps } : {},
+    tokens: res && res.usage ? (res.usage.output_tokens || 0) : 0, error: err,
+  };
+}
+// A recorded tick (see _lib/recorder.mjs): { action, model_action, intervened, reason, extras, answers, timing, ... }.
+// The board is rebuilt from the seed with logic.step, exactly like a live run.
+function askReplay(state) {
+  const t = run.log.ticks[ep.i];
+  if (!t) return Promise.resolve(null);
+  const modelAction = t.model_action != null ? t.model_action : t.action;
+  return Promise.resolve({
+    qs: logic.questions(state), answers: t.answers || null,
+    decision: { action: modelAction, extras: t.extras || {} },
+    recordedShield: { intervened: !!t.intervened, reason: t.reason || '', action: t.action },
+    recordedAction: t.action, timing: t.timing || {}, tokens: (t.usage && t.usage.output_tokens) || 0,
+  });
+}
+const ask = state => run.mode === 'replay' ? askReplay(state) : askLive(state);
+function requestNext(state) { ep.pending = ask(state).then(r => { ep.result = r; if (r) onNextDecision(r); }); }
+
+/* ---- applying a decision = one tick ---- */
+function apply(res, now) {
+  const s = ep.state;
+  let action = res.decision.action, sh = { intervened: false, reason: '', action };
+  if (run.mode === 'replay') { sh = res.recordedShield; action = res.recordedAction; }
+  else if (run.shield) { sh = logic.shield(s, action, res.decision.extras || {}); action = sh.action; }
+  const out = logic.step(s, action);
+  ep.prev = s; ep.state = out.state; ep.tickStart = now; ep.headHot = 1; ep.i++;
+  counters.decisions++; if (sh.intervened) counters.interventions++; counters.tokens += res.tokens || 0;
+  panel.update({
+    questions: res.qs, answers: res.answers || {}, decision: res.decision, shield: sh,
+    timing: res.timing, counters: { ...counters },
+    status: { mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield },
+  });
+  onApplied(res, out, sh, action, now);
+  paintHud();
+  if (out.done || (run.mode === 'replay' && ep.i >= run.log.ticks.length)) {
+    ep.dead = true; ep.deadAt = now; ep.pending = null; ep.result = null;
+    return;
+  }
+  requestNext(ep.state);
+}
+
+function paintHud() {
+  const sum = logic.summary(ep.state);
+  countUp($('hudScore'), sum.score);
+  countUp($('hudSecond'), sum.height != null ? sum.height : 0, { pop: false });
+  if (sum.score > best) { best = sum.score; localStorage.setItem(BEST_KEY, String(best)); countUp($('hudBest'), best); $('hudBestStat').classList.add('hot'); }
+  const total = run.mode === 'replay' ? run.log.ticks.length : MAX_STEPS;
+  const at = run.mode === 'replay' ? ep.i : sum.steps;
+  $('stepText').textContent = `${at} / ${total}`;
+  ringProgress($('ring'), at / total);
+}
+
+function startEpisode(now) {
+  const seed = run.mode === 'replay' ? (run.log.seed != null ? run.log.seed : 1) : ((Date.now() + run.seedCount++) % 1e6) + 1;
+  ep.state = logic.init(seed);
+  ep.prev = ep.state; ep.tickStart = now; ep.dead = false; ep.i = 0; ep.headHot = 0; ep.result = null; ep.bornAt = now;
+  $('hudBestStat').classList.remove('hot');
+  const st = $('stage'); st.classList.remove('born'); void st.offsetWidth; st.classList.add('born');
+  onEpisodeStart(ep.state, now);
+  paintHud();
+  requestNext(ep.state);
+}
+
+/* ---- the frame loop with sub-tick timing ---- */
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!ep.state) return;
+  const dt = now - last; last = now;
+  if (ep.dead) {
+    render(ep.state, ep.state, 1, { dead: true, deadT: (now - ep.deadAt) / 1000, paused: run.paused, dt, now });
+    if (!run.paused && now - ep.deadAt > 1500) { panel.reset(); startEpisode(now); }
+    return;
+  }
+  if (run.paused) { render(ep.prev, ep.state, 1, { paused: true, dt: 0, now }); return; }
+  let t = (now - ep.tickStart) / tickDur();
+  if (t >= 1) {
+    if (ep.result) { const r = ep.result; ep.result = null; apply(r, now); t = 0; }
+    else if (ep.pending === null && run.mode === 'replay') { ep.dead = true; ep.deadAt = now; }
+    else t = 1;                                   // the answer is still in flight: hold at the end of the glide
+  }
+  ep.headHot = Math.max(0, ep.headHot - dt / 320);
+  render(ep.prev, ep.state, t, { headHot: ep.headHot, dt, now });
+}
+
+/* ---- keys ---- */
+const actions = {
+  pause() { run.paused = !run.paused; overlay(run.paused, 'Paused', 'Press <kbd>Space</kbd> to continue'); if (!run.paused) { ep.tickStart = performance.now(); if (ep.dead) ep.deadAt = performance.now(); } },
+  faster() { run.speedIx = Math.min(SPEEDS.length - 1, run.speedIx + 1); paintStatus(); },
+  slower() { run.speedIx = Math.max(0, run.speedIx - 1); paintStatus(); },
+  reset() { counters.decisions = counters.interventions = counters.tokens = 0; roundtrips.length = 0; panel.reset(); startEpisode(performance.now()); if (run.paused) actions.pause(); },
+  policy() { if (run.mode === 'replay') return; run.policy = run.policy === 'model' ? 'heuristic' : 'model'; paintStatus(); },
+  back() { location.href = '../'; },
+};
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = { ' ': 'pause', ArrowUp: 'faster', ArrowDown: 'slower', r: 'reset', R: 'reset', m: 'policy', M: 'policy', q: 'back', Q: 'back' }[e.key];
+  if (!k) return; e.preventDefault(); actions[k]();
+});
+document.querySelectorAll('footer.keys button').forEach(b => b.addEventListener('click', () => actions[b.dataset.key]()));
+
+/* ---- boot: live if the server answers, otherwise the recorded run ---- */
+async function boot() {
+  let ready = false;
+  if (!(params.get('mode') === 'replay')) {
+    try {
+      const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 2500);
+      const r = await fetch(BASE + '/readyz', { cache: 'no-store', signal: ctrl.signal }); clearTimeout(to);
+      const j = await r.json().catch(() => ({}));
+      ready = r.ok && j.status === 'ready';
+    } catch (e) { ready = false; }
+  }
+  if (ready) {
+    run.mode = 'live'; run.connected = true;
+    run.client = createClient({ baseUrl: BASE, model: params.get('model') || 'auto' });
+  } else {
+    try {
+      const r = await fetch(REPLAY_URL, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      run.log = await r.json();
+      if (!Array.isArray(run.log.ticks) || !run.log.ticks.length) throw new Error('empty recording');
+      run.mode = 'replay'; run.engine = run.log.engine || run.log.model || 'recorded';
+    } catch (e) {
+      run.mode = 'down';
+      overlay(true, 'Nothing to play', `No arbiter server at <b>${esc(BASE)}</b> and no recording at <b>${esc(REPLAY_URL)}</b>. Start the server (<b>./run.sh</b>) and reload, or add <b>?base=http://localhost:8010</b> to the URL.`);
+      paintStatus(); return;
+    }
+  }
+  paintStatus();
+  startEpisode(performance.now());
+  requestAnimationFrame(frame);
+  if (run.mode === 'live') setInterval(async () => {
+    try { const r = await fetch(BASE + '/readyz', { cache: 'no-store' }); const j = await r.json(); const ok = r.ok && j.status === 'ready'; if (ok !== run.connected) { run.connected = ok; paintStatus(); } }
+    catch (e) { if (run.connected) { run.connected = false; paintStatus(); } }
+  }, 10000);
+}
+
+/* =====================================================================================
+   HOPPER — the game-specific part of the page.
+     actorPixel(state)                      where the pulse starts, in CSS px on the canvas
+     onEpisodeStart(state, now)             reset the visual effects
+     onApplied(res, out, shield, action)    a decision was played: wing beat, particles, halo
+     onNextDecision(res)                    the answer for the NEXT tick arrived: the gauge leans
+     render(prev, cur, t, fx)               every frame, t in [0,1] = progress from prev to cur
+   The halo here has two wedges, up and down, because the whole game is one noul.
+   ===================================================================================== */
+const ANGLES = { flap: -Math.PI / 2, glide: Math.PI / 2 };
+const vis = {
+  particles: createParticles(), shake: createShake(),
+  halo: null, flapAt: -1e9, passAt: -1e9, bornAt: 0, next: null,
+  trail: [],                 // where the bird has been: {x, y}
+};
+const lerp = (a, b, t) => a + (b - a) * t;
+// The world is 28 columns by 20 rows and the stage is nearly square, so the cells are not: the
+// arena fills the frame, and `c` (the short side of a cell) is what every radius is drawn from.
+const geom = () => {
+  const s = ep.state || logic.init(1);
+  const top = Math.round(64 * dpr), side = Math.round(16 * dpr);
+  const cx = (W - side * 2) / s.w, cy = (H - top - side) / s.h;
+  return { cx, cy, c: Math.min(cx, cy), padX: side, padY: top, w: s.w, h: s.h };
+};
+function actorPixel(state) {
+  if (!state || !W) return null;
+  const { cx, cy, padX, padY } = geom();
+  return [(padX + (state.birdX + .5) * cx) / dpr, (padY + state.y * cy) / dpr];
+}
+function onEpisodeStart(state, now) {
+  vis.halo = null; vis.flapAt = -1e9; vis.passAt = -1e9; vis.bornAt = now; vis.trail.length = 0; vis.next = null;
+}
+function onApplied(res, out, sh, action, now) {
+  const p = res.answers && res.answers.flap ? res.answers.flap.noul : null;
+  vis.halo = p == null ? null : { probs: { flap: p, glide: 1 - p }, chosen: action };
+  if (action === 'flap') vis.flapAt = now;
+  if ((out.events || []).some(e => /through/.test(e))) {
+    vis.passAt = now;
+    const { cx, cy, c, padX, padY } = geom();
+    vis.particles.burst(padX + (out.state.birdX + .5) * cx, padY + out.state.y * cy,
+      { count: 16, speed: c * 4, size: c * .09, life: .5, color: COLORS.orange });
+  }
+  if (out.done) vis.shake.kick(1);
+}
+function onNextDecision(res) { vis.next = res && res.answers && res.answers.flap ? res.answers.flap.noul : null; }
+
+function render(prev, cur, t, fx = {}) {
+  if (!W) return;
+  const now = fx.now || performance.now(), dt = (fx.dt || 0) / 1000;
+  const { cx, cy, c, padX, padY, w, h } = geom();
+  const dead = !!fx.dead && !cur.alive, deadT = fx.deadT || 0;
+  const born = Math.min(1, (now - vis.bornAt) / 450);
+  const px = (x, y) => [padX + x * cx, padY + y * cy];
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const [sx, sy] = vis.shake.offset(dt);
+  ctx.translate(sx * dpr, sy * dpr);
+  drawBoardDepth(ctx, W, H, { dpr, vignette: .8 });
+
+  // the arena: floor and ceiling, the two things that kill without a wall
+  ctx.strokeStyle = 'rgba(85,131,255,.35)'; ctx.lineWidth = 2 * dpr;
+  ctx.shadowColor = 'rgba(85,131,255,.45)'; ctx.shadowBlur = 18 * dpr;
+  ctx.strokeRect(padX, padY, w * cx, h * cy);
+  ctx.shadowBlur = 0;
+
+  // the walls, gliding left by the same fraction as everything else
+  for (let i = 0; i < cur.pipes.length; i++) {
+    const pipe = cur.pipes[i];
+    const before = prev.pipes.find(p => Math.abs(p.gapY - pipe.gapY) < 1e-9);
+    const x = lerp(before ? before.x : pipe.x + 1, pipe.x, t);
+    const [wx] = px(x, 0);
+    const gapTop = pipe.gapY - cur.gap / 2, gapBot = pipe.gapY + cur.gap / 2;
+    const width = cx * .9;
+    const next = cur.pipes.find(p => p.x >= cur.birdX) === pipe;
+    ctx.globalAlpha = born * (dead ? .5 : 1);
+    ctx.fillStyle = next ? 'rgba(85,131,255,.30)' : 'rgba(85,131,255,.16)';
+    ctx.strokeStyle = next ? 'rgba(125,160,255,.85)' : 'rgba(125,160,255,.35)';
+    ctx.lineWidth = Math.max(1, dpr);
+    for (const [y0, y1] of [[0, gapTop], [gapBot, h]]) {
+      const [, ty] = px(0, y0), [, by] = px(0, y1);
+      ctx.beginPath(); ctx.roundRect(wx - width / 2, ty, width, by - ty, cx * .18); ctx.fill(); ctx.stroke();
+    }
+    // the gap the bird is aiming at, drawn as a target line
+    if (next && !dead) {
+      const [, gy] = px(0, pipe.gapY);
+      ctx.strokeStyle = 'rgba(255,140,51,.55)'; ctx.setLineDash([cx * .25, cx * .25]); ctx.lineWidth = Math.max(1, dpr);
+      ctx.beginPath(); ctx.moveTo(padX, gy); ctx.lineTo(wx + width, gy); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // the bird: position interpolated, tilt from the speed, a wing beat right after a flap
+  const by = lerp(prev.y, cur.y, t);
+  const [bx, byPx] = px(cur.birdX + .5, by);
+  vis.trail.push({ x: bx, y: byPx }); if (vis.trail.length > 26) vis.trail.shift();
+  ctx.lineCap = 'round';
+  for (let i = 1; i < vis.trail.length; i++) {
+    const a = (i / vis.trail.length) * .32 * born;
+    ctx.strokeStyle = `rgba(125,160,255,${a.toFixed(3)})`; ctx.lineWidth = c * .12 * (i / vis.trail.length);
+    ctx.beginPath(); ctx.moveTo(vis.trail[i - 1].x, vis.trail[i - 1].y); ctx.lineTo(vis.trail[i].x, vis.trail[i].y); ctx.stroke();
+  }
+  if (vis.halo && !dead) {
+    drawDecisionHalo(ctx, { x: bx, y: byPx }, vis.halo.probs, vis.halo.chosen, null,
+      { inner: c * .62, reach: c * 1.5, spread: .5, angles: ANGLES, alpha: born });
+  }
+  const tilt = Math.max(-.6, Math.min(.9, cur.vy * .35));
+  const sinceFlap = (now - vis.flapAt) / 1000;
+  const beat = sinceFlap < .22 ? Math.sin((sinceFlap / .22) * Math.PI) : 0;
+  ctx.save(); ctx.globalAlpha = born * (dead ? Math.max(0, 1 - deadT / .8) : 1);
+  ctx.translate(bx, byPx); ctx.rotate(tilt);
+  if (beat > 0) { ctx.shadowColor = 'rgba(125,160,255,.9)'; ctx.shadowBlur = 20 * dpr * beat; }
+  ctx.fillStyle = dead ? COLORS.danger : COLORS.cobaltText;
+  ctx.beginPath(); ctx.ellipse(0, 0, c * .42, c * .34, 0, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0;
+  // the wing, folded when gliding and thrown down on a flap
+  ctx.fillStyle = dead ? 'rgba(240,96,92,.7)' : 'rgba(85,131,255,.9)';
+  ctx.beginPath(); ctx.ellipse(-c * .08, c * .05 + beat * c * .22, c * .26, c * .13, -.5 + beat * 1.1, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#0A0F1E';
+  ctx.beginPath(); ctx.arc(c * .18, -c * .08, c * .06, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = dead ? COLORS.danger : COLORS.orange;
+  ctx.beginPath(); ctx.moveTo(c * .38, -c * .02); ctx.lineTo(c * .58, c * .03); ctx.lineTo(c * .38, c * .1); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // the noul for the NEXT tick, as a gauge inside the left wall: this game is one number a tick,
+  // and the orange line is the 0.5 the decision is taken at
+  if (vis.next != null && !dead) {
+    const gx = padX + cx * .9, gTop = padY + cy * 1.5, gH = h * cy - cy * 3;
+    const width = Math.max(4 * dpr, cx * .3);
+    ctx.fillStyle = 'rgba(43,55,88,.7)';
+    ctx.beginPath(); ctx.roundRect(gx - width / 2, gTop, width, gH, width / 2); ctx.fill();
+    const y = gTop + gH * (1 - vis.next);
+    ctx.fillStyle = vis.next >= .5 ? COLORS.cobalt : 'rgba(125,160,255,.5)';
+    ctx.beginPath(); ctx.roundRect(gx - width / 2, y, width, gTop + gH - y, width / 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,140,51,.8)'; ctx.lineWidth = Math.max(1, dpr);
+    const mid = gTop + gH * .5;
+    ctx.beginPath(); ctx.moveTo(gx - width, mid); ctx.lineTo(gx + width, mid); ctx.stroke();
+    ctx.fillStyle = 'rgba(139,149,179,.9)';
+    ctx.font = `${Math.round(11 * dpr)}px "JetBrains Mono", ui-monospace, monospace`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText('flap ' + vis.next.toFixed(2), gx + width, gTop + gH * (1 - vis.next));
+  }
+
+  vis.particles.step(dt); vis.particles.draw(ctx, 1);
+  if (dead) drawDangerVignette(ctx, W, H, Math.max(0, 1 - deadT / .55));
+  if (fx.paused) { ctx.fillStyle = 'rgba(10,15,30,.45)'; ctx.fillRect(-20 * dpr, -20 * dpr, W + 40 * dpr, H + 40 * dpr); }
+}
+boot();
+</script>
+</body>
+</html>

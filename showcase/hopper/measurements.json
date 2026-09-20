@@ -1,0 +1,212 @@
+{
+  "game": "hopper",
+  "generated_at": "2026-09-20T10:38:47.020Z",
+  "server": {
+    "base": "http://localhost:8010",
+    "model": "auto",
+    "device": "mps",
+    "mode": "eager",
+    "dtype": "fp32"
+  },
+  "tick_ms": 100,
+  "questions_per_tick": 1,
+  "wall_seconds": 102.6,
+  "policies": {
+    "model": {
+      "episodes": 20,
+      "max_steps": 300,
+      "score": {
+        "mean": 13.4,
+        "median": 12.5,
+        "max": 26,
+        "all": [
+          5,
+          9,
+          16,
+          1,
+          26,
+          3,
+          26,
+          12,
+          2,
+          16,
+          26,
+          4,
+          26,
+          13,
+          5,
+          26,
+          6,
+          22,
+          14,
+          10
+        ]
+      },
+      "steps": {
+        "mean": 165.6,
+        "median": 157.5,
+        "max": 300
+      },
+      "decisions": {
+        "total": 3312,
+        "per_episode": 165.6
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 251060,
+      "inference_ms": {
+        "n": 3312,
+        "p50": 29.1,
+        "p95": 30.8,
+        "max": 57.7
+      },
+      "roundtrip_ms": {
+        "n": 3312,
+        "p50": 30.8,
+        "p95": 32.7,
+        "max": 60.1
+      },
+      "decisions_per_s": 32.5,
+      "throughput_per_s": 32.3,
+      "calibration": {
+        "flap": {
+          "type": "noul",
+          "n": 3312,
+          "positives": 1850,
+          "mean_when_true": 0.49,
+          "mean_when_false": 0.39,
+          "auroc": 0.975,
+          "baseline_auroc": null,
+          "table": {
+            "true_positive": 561,
+            "false_positive": 13,
+            "false_negative": 1289,
+            "true_negative": 1449
+          }
+        }
+      }
+    },
+    "random+shield": {
+      "episodes": 20,
+      "max_steps": 300,
+      "score": {
+        "mean": 0,
+        "median": 0,
+        "max": 0,
+        "all": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 14.4,
+        "median": 14.5,
+        "max": 20
+      },
+      "decisions": {
+        "total": 288,
+        "per_episode": 14.4
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    },
+    "heuristic+shield": {
+      "episodes": 20,
+      "max_steps": 300,
+      "score": {
+        "mean": 26,
+        "median": 26,
+        "max": 26,
+        "all": [
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26,
+          26
+        ]
+      },
+      "steps": {
+        "mean": 300,
+        "median": 300,
+        "max": 300
+      },
+      "decisions": {
+        "total": 6000,
+        "per_episode": 300
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    }
+  }
+}

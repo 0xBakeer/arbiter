@@ -1,0 +1,256 @@
+{
+  "game": "paddle",
+  "generated_at": "2026-09-20T10:52:16.971Z",
+  "server": {
+    "base": "http://localhost:8010",
+    "model": "auto",
+    "device": "mps",
+    "mode": "eager",
+    "dtype": "fp32"
+  },
+  "tick_ms": 60,
+  "questions_per_tick": 1,
+  "wall_seconds": 152,
+  "policies": {
+    "model": {
+      "episodes": 20,
+      "max_steps": 300,
+      "score": {
+        "mean": 4.6,
+        "median": 1,
+        "max": 12,
+        "all": [
+          0,
+          12,
+          12,
+          0,
+          12,
+          0,
+          5,
+          7,
+          12,
+          1,
+          1,
+          0,
+          12,
+          12,
+          0,
+          0,
+          0,
+          1,
+          5,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 123.7,
+        "median": 37,
+        "max": 300
+      },
+      "decisions": {
+        "total": 2474,
+        "per_episode": 123.7
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 191462,
+      "inference_ms": {
+        "n": 2474,
+        "p50": 29,
+        "p95": 30.8,
+        "max": 62.7
+      },
+      "roundtrip_ms": {
+        "n": 2474,
+        "p50": 30.8,
+        "p95": 32.8,
+        "max": 66.1
+      },
+      "decisions_per_s": 32.5,
+      "throughput_per_s": 32.6,
+      "calibration": {}
+    },
+    "model+shield": {
+      "episodes": 20,
+      "max_steps": 300,
+      "score": {
+        "mean": 4.6,
+        "median": 1,
+        "max": 12,
+        "all": [
+          0,
+          12,
+          12,
+          0,
+          12,
+          0,
+          5,
+          7,
+          12,
+          1,
+          1,
+          0,
+          12,
+          12,
+          0,
+          0,
+          0,
+          1,
+          5,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 123.7,
+        "median": 37,
+        "max": 300
+      },
+      "decisions": {
+        "total": 2474,
+        "per_episode": 123.7
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 191462,
+      "inference_ms": {
+        "n": 2474,
+        "p50": 29.1,
+        "p95": 31.4,
+        "max": 41
+      },
+      "roundtrip_ms": {
+        "n": 2474,
+        "p50": 30.9,
+        "p95": 33.4,
+        "max": 43.3
+      },
+      "decisions_per_s": 32.4,
+      "throughput_per_s": 32.5,
+      "calibration": {}
+    },
+    "random+shield": {
+      "episodes": 20,
+      "max_steps": 300,
+      "score": {
+        "mean": 0.15,
+        "median": 0,
+        "max": 2,
+        "all": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          2,
+          0
+        ]
+      },
+      "steps": {
+        "mean": 14.9,
+        "median": 11,
+        "max": 63
+      },
+      "decisions": {
+        "total": 298,
+        "per_episode": 14.9
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    },
+    "heuristic+shield": {
+      "episodes": 20,
+      "max_steps": 300,
+      "score": {
+        "mean": 12,
+        "median": 12,
+        "max": 12,
+        "all": [
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12,
+          12
+        ]
+      },
+      "steps": {
+        "mean": 300,
+        "median": 300,
+        "max": 300
+      },
+      "decisions": {
+        "total": 6000,
+        "per_episode": 300
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    }
+  }
+}
