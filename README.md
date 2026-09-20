@@ -9,9 +9,13 @@ client written against Jev works against this by changing the base URL, and thre
 (English, multilingual, and a typed-decisions fine-tune) resident at once with automatic routing
 between them.
 
-It answers a single question in **17–21 ms** and fifty in one call in **152 ms**, and it uses
-about 5 GB of GPU memory, which is little enough to sit next to a large language model on the
-same card.
+On one GB10 it answers a single question in **20.9 ms** and fifty questions in one call in
+**152 ms**, measured end-to-end over HTTP. Realistic states — a support ticket, an email, a
+diff — carry more tokens and more questions, and land in the **tens of milliseconds**; the
+captured runs are in [docs/use-cases.md](docs/use-cases.md). It uses about 5 GB of GPU memory,
+which is little enough to sit next to a large language model on the same card.
+
+![One call, many typed answers](docs/assets/one-call-typed-answers.svg)
 
 ---
 
@@ -35,10 +39,22 @@ which takes torch's plain kernels instead; it prints a line when it does.
 
 ```bash
 ./run.sh status     # /healthz, /readyz, /v1/models
-./run.sh smoke      # seven real requests across all three checkpoints, with answers and timings
+./run.sh smoke      # the playground page and seven real requests across all three checkpoints
+./run.sh examples   # a support ticket through examples/support_triage.py
 ./run.sh bench      # the numbers below, about ninety seconds
+./run.sh test       # both pytest suites; no GPU and no running server needed
 ./run.sh stop
 ```
+
+## Playground
+
+`./run.sh serve` also serves a page at `http://localhost:8010/`: paste a state, add questions of
+all three types, and read the answers with their probabilities, the checkpoint that answered and
+the latency. It is one self-contained file, [`playground/index.html`](playground/index.html),
+served from the same origin as the API, so it needs no configuration and the server needs no
+CORS headers. To work on the page without a GPU, `python3 playground/serve_stub.py` serves it
+with stub answers on port 8011, and `--proxy http://localhost:8010` forwards the calls to a real
+server while keeping the page same-origin.
 
 ## Ask it something
 
@@ -113,6 +129,59 @@ while doing it. Detection costs microseconds, so the routing is free.
 
 `typed-decisions` is never selected automatically. Ask for it by name.
 
+## Examples
+
+Nine runnable scripts in [`examples/`](examples), each one a real decision with the thresholds
+in the caller and a review band in the middle. They need nothing but a Python 3 and a running
+server: [`examples/laya_client.py`](examples/laya_client.py) is a single dependency-free file
+whose API mirrors the hosted SDK, so code written against Jev ports by changing the import and
+the base URL.
+
+| Use case | Script | What it decides | Route |
+|---|---|---|---|
+| Support tickets | `support_triage.py` | department, urgency, frustration, refund, churn | `auto` · `review` · `escalate` |
+| Inbox triage | `email_triage.py` | category, phishing, action needed, reply-by | `auto` · `review` · `escalate` · `block` |
+| Agent shell commands | `tool_call_guard.py` | destructive, secrets, leaves repo, network, blast radius | `allow` · `ask` · `deny` |
+| Pull requests | `pr_risk_gate.py` | credentials, migration, shared infra, rollback, blast radius | `allow` · `review` · `block` |
+| Monitoring alerts | `alert_triage.py` | service, root cause, severity, duplicate of an open incident | `suppress` · `ticket` · `page` |
+| Model selection | `model_router.py` | complexity, needs tools, needs long context | `fast` · `cascade` · `powerful` |
+| RAG passages | `rag_relevance.py` | per-passage relevance, hierarchical past 12 | `keep` · `?` · `drop` |
+| Message screening | `moderation.py` | jailbreak, harmful, PII, off-topic, severity | `allow` · `review` · `block` |
+| Invoices (typed-decisions) | `invoice_fields.py` | currency, amount band, duplicate, approval, bank change | `pay` · `approve` · `review` |
+
+```bash
+python examples/support_triage.py                 # a built-in sample
+python examples/email_triage.py --sample de       # watch the router pick multilingual
+git diff main | python examples/pr_risk_gate.py   # exit code is the gate: 0/1/2
+python examples/moderation.py --state msg.txt --json
+```
+
+Each script prints one row per question with a probability bar, the checkpoint that answered and
+the latency, then the route its own thresholds chose. Captured output for every one of them is
+in [`docs/use-cases.md`](docs/use-cases.md); the shapes they are built from — fan-out,
+confidence-gated routing, composite scoring, hierarchical intent, cascade — are in
+[`docs/patterns.md`](docs/patterns.md).
+
+## Use it from your coding agent
+
+[`integrations/mcp/laya_mcp.py`](integrations/mcp/laya_mcp.py) is an MCP server over the same
+endpoint: `laya_check`, `laya_classify`, `laya_score`, `laya_gate` and `laya_decide`, each
+returning structured content plus one line of text. Point any MCP client at it:
+
+```bash
+pip install "mcp>=2"
+claude mcp add laya --env LAYA_URL=http://localhost:8010 -- python3 $PWD/integrations/mcp/laya_mcp.py
+codex  mcp add laya --env LAYA_URL=http://localhost:8010 -- python3 $PWD/integrations/mcp/laya_mcp.py
+```
+
+[`integrations/claude-code/`](integrations/claude-code) is a plugin that adds a skill (when to
+use which primitive, how to shape state and questions, why thresholds belong in your code) and a
+`PreToolUse` hook that judges every `Bash` command before it runs — allow, ask or deny, in tens
+of milliseconds, failing open when the server is not there. Ready-made configuration for Codex,
+OpenCode, omp and any generic `.mcp.json` client, plus a GitHub Actions job that gates pull
+requests, is in [`integrations/`](integrations) and documented in
+[`docs/integrations.md`](docs/integrations.md).
+
 ## The numbers
 
 One GB10, questions cycling through all three types, measured end-to-end over HTTP.
@@ -179,6 +248,8 @@ is inside the gate but not nothing.
 
 ## Runs next to an LLM
 
+![The cascade next to an LLM](docs/assets/cascade-next-to-an-llm.svg)
+
 Measured with an unrelated LLM already holding 63,871 MiB on the same GPU:
 
 | | |
@@ -224,6 +295,12 @@ matter more than anything this recipe does.
 
 ## Documentation
 
+- [docs/use-cases.md](docs/use-cases.md) — the nine examples, their question sets, and the
+  output captured from a live server for each one
+- [docs/patterns.md](docs/patterns.md) — the five shapes the examples are built from, with a
+  pasteable sketch of each
+- [docs/integrations.md](docs/integrations.md) — the MCP server, the Claude Code plugin, the
+  per-agent configuration and the CI job
 - [docs/serving-options.md](docs/serving-options.md) — what was considered, what shipped, and
   what was ruled out with the measurement that ruled it out
 - [bench/results.md](bench/results.md) — every figure and how it was taken

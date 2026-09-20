@@ -52,7 +52,7 @@
   <rect class="layer" x="352" y="196" width="188" height="22" rx="3"/>
   <text class="m small" x="446" y="211" text-anchor="middle">typed decision head</text>
   <text class="t" x="352" y="250">no tokens generated</text>
-  <text class="accent2 mono" x="540" y="250" text-anchor="end">~10 ms</text>
+  <text class="accent2 mono" x="540" y="250" text-anchor="end">~30 ms</text>
 
   <!-- arrow -->
   <path class="arrow" d="M558 150 H598"/><path class="ah" d="M598 145 l9 5 -9 5z"/>
