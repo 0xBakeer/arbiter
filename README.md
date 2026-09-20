@@ -1,13 +1,24 @@
-# Laya on one NVIDIA GPU
+# arbiter
 
-Laya answers typed questions about a piece of text in **one forward pass** — no tokens
-generated, no sampling, no loop. You hand it a state and a set of questions, and it returns an
-answer and a probability distribution for each of them at once.
+Serve typed-decision models — Laya or your own — on your GPU or your Mac, with a Jev-compatible
+API.
 
-This is a recipe for serving it: a small HTTP server that speaks TypeSafe's **Jev** API, so a
-client written against Jev works against this by changing the base URL, and three checkpoints
-(English, multilingual, and a typed-decisions fine-tune) resident at once with automatic routing
-between them.
+## Why the name, and what this is
+
+A typed-decision model answers questions about a piece of text in **one forward pass** — no
+tokens generated, no sampling, no loop. You hand it a state and a set of questions, and it
+returns an answer and a probability distribution for each of them at once. There is no prose to
+read back and nothing to argue with: it arbitrates, and your code decides what to do with the
+numbers.
+
+This repository is the serving layer around that and deliberately nothing more — a small HTTP
+server that speaks TypeSafe's **Jev** API, so a client written against Jev works against this by
+changing the base URL; cross-request micro-batching; routing between checkpoints; a playground;
+and the measurements that picked every default. The model is a plug: **Laya** today, with its
+three checkpoints (English, multilingual, and a typed-decisions fine-tune) resident at once and
+automatic routing between them, and whatever is trained here next behind the same interface
+([engines/README.md](engines/README.md)). So is the machine: one recipe per accelerator under
+[recipes/](recipes), NVIDIA measured and Apple next.
 
 On one GB10 it answers a single question in **20.9 ms** and fifty questions in one call in
 **152 ms**, measured end-to-end over HTTP. Realistic states — a support ticket, an email, a
@@ -26,8 +37,8 @@ from the CUDA 13.0 index, which has both aarch64 and x86_64 builds, so this is n
 any one box.
 
 ```bash
-git clone https://github.com/0xBakeer/laya-spark.git
-cd laya-spark
+git clone https://github.com/0xBakeer/arbiter.git
+cd arbiter
 ./run.sh setup      # .venv, torch, the deps, and the three checkpoints (2.3 GB)
 ./run.sh serve      # http://localhost:8010
 ```
@@ -106,9 +117,9 @@ response shape, and a Jev client ignores extra keys.
 
 Question types are Jev's: `noul` (a probability that a statement holds, criteria optional),
 `choice` (up to 255 named options), `score` (2 to 10 ordered levels). Violations come back as
-`422` with a JSON error body. Set `LAYA_API_KEY` and the server requires
+`422` with a JSON error body. Set `ARBITER_API_KEY` and the server requires
 `Authorization: Bearer <key>`, answering `401` otherwise. More question rows in flight than
-`LAYA_MAX_QUEUE` gets `529`.
+`ARBITER_MAX_QUEUE` gets `529`.
 
 ### Routing
 
@@ -133,7 +144,7 @@ while doing it. Detection costs microseconds, so the routing is free.
 
 Nine runnable scripts in [`examples/`](examples), each one a real decision with the thresholds
 in the caller and a review band in the middle. They need nothing but a Python 3 and a running
-server: [`examples/laya_client.py`](examples/laya_client.py) is a single dependency-free file
+server: [`examples/arbiter_client.py`](examples/arbiter_client.py) is a single dependency-free file
 whose API mirrors the hosted SDK, so code written against Jev ports by changing the import and
 the base URL.
 
@@ -164,14 +175,14 @@ confidence-gated routing, composite scoring, hierarchical intent, cascade — ar
 
 ## Use it from your coding agent
 
-[`integrations/mcp/laya_mcp.py`](integrations/mcp/laya_mcp.py) is an MCP server over the same
-endpoint: `laya_check`, `laya_classify`, `laya_score`, `laya_gate` and `laya_decide`, each
+[`integrations/mcp/arbiter_mcp.py`](integrations/mcp/arbiter_mcp.py) is an MCP server over the same
+endpoint: `arbiter_check`, `arbiter_classify`, `arbiter_score`, `arbiter_gate` and `arbiter_decide`, each
 returning structured content plus one line of text. Point any MCP client at it:
 
 ```bash
 pip install "mcp>=2"
-claude mcp add laya --env LAYA_URL=http://localhost:8010 -- python3 $PWD/integrations/mcp/laya_mcp.py
-codex  mcp add laya --env LAYA_URL=http://localhost:8010 -- python3 $PWD/integrations/mcp/laya_mcp.py
+claude mcp add arbiter --env ARBITER_URL=http://localhost:8010 -- python3 $PWD/integrations/mcp/arbiter_mcp.py
+codex  mcp add arbiter --env ARBITER_URL=http://localhost:8010 -- python3 $PWD/integrations/mcp/arbiter_mcp.py
 ```
 
 [`integrations/claude-code/`](integrations/claude-code) is a plugin that adds a skill (when to
@@ -200,7 +211,7 @@ scale, not as a ranking.
 
 ### The two settings that are worth understanding
 
-**`LAYA_DTYPE`** — `autocast` (default) keeps fp32 parameters and runs the matmuls in bf16, as
+**`ARBITER_DTYPE`** — `autocast` (default) keeps fp32 parameters and runs the matmuls in bf16, as
 the SDK does. `bf16` converts the parameters and drops autocast, which is 15–35% faster:
 14.0 ms instead of 20.9 at one question, 380 questions/s instead of 287 at concurrency 8.
 
@@ -213,7 +224,7 @@ that they ship over-confident and want refitting on your data before you trust t
 2e-2 of that budget to save six milliseconds is the wrong trade. It is one environment variable
 away if your workload disagrees.
 
-**`LAYA_MODE`** — `eager` (default) or `graphs`. Graphs mode captures the forward as a CUDA
+**`ARBITER_MODE`** — `eager` (default) or `graphs`. Graphs mode captures the forward as a CUDA
 graph per padded shape bucket and replays it, which removes the cost of launching several
 hundred small kernels. It is faster where there is little work to amortise padding over and
 slower where there is plenty:
@@ -236,14 +247,14 @@ is inside the gate but not nothing.
 |---|---|---|
 | `PORT` / `HOST` | `8010` / `0.0.0.0` | |
 | `DEVICE` | `cuda` | `cpu` works, and is roughly an order of magnitude slower |
-| `LAYA_MODELS` | all three | comma-separated; a subset saves memory, and the router falls back to what is loaded |
-| `LAYA_MODE` | `eager` | or `graphs` |
-| `LAYA_DTYPE` | `autocast` | or `bf16` |
-| `LAYA_API_KEY` | unset | set it to require `Authorization: Bearer` |
-| `LAYA_BATCH_WAIT_MS` | `2` | how long a batch waits for company |
-| `LAYA_MAX_BATCH` | `64` | question rows per forward |
-| `LAYA_MAX_QUEUE` | `256` | rows in flight before `529` |
-| `LAYA_GRAPH_MAX_MARKERS` | `32` | questions with more options than this take the eager path |
+| `ARBITER_MODELS` | all three | comma-separated; a subset saves memory, and the router falls back to what is loaded |
+| `ARBITER_MODE` | `eager` | or `graphs` |
+| `ARBITER_DTYPE` | `autocast` | or `bf16` |
+| `ARBITER_API_KEY` | unset | set it to require `Authorization: Bearer` |
+| `ARBITER_BATCH_WAIT_MS` | `2` | how long a batch waits for company |
+| `ARBITER_MAX_BATCH` | `64` | question rows per forward |
+| `ARBITER_MAX_QUEUE` | `256` | rows in flight before `529` |
+| `ARBITER_GRAPH_MAX_MARKERS` | `32` | questions with more options than this take the eager path |
 | `MODELS_DIR` | `./models` | |
 
 ## Runs next to an LLM
@@ -255,13 +266,13 @@ Measured with an unrelated LLM already holding 63,871 MiB on the same GPU:
 | | |
 |---|---|
 | Laya, all three checkpoints, `autocast` | **5,055 MiB** of GPU memory |
-| the same in `LAYA_DTYPE=bf16` | about 2,900 MiB |
+| the same in `ARBITER_DTYPE=bf16` | about 2,900 MiB |
 | host RSS | 3.6 GB |
 | host memory before / after starting it | 74 GiB / 82 GiB used of 121 |
 
 The LLM was serving throughout and was unaffected. Three checkpoints is 1.16B parameters, which
 is small enough that the decision is about whether you want all three rather than about whether
-they fit; `LAYA_MODELS=english` alone is about 1.9 GB.
+they fit; `ARBITER_MODELS=english` alone is about 1.9 GB.
 
 The reason all three stay resident is that the SDK's `Router` defaults to keeping one. A server
 that alternates between English and German requests would then reload a checkpoint from disk on

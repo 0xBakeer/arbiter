@@ -492,7 +492,7 @@ class Engine:
     def route(self, state, questions, model=None, task=None, lang=None) -> Dict[str, Any]:
         """The router's decision, clamped to what this process actually has loaded.
 
-        `LAYA_MODELS` may select a subset, and a request that routes to a checkpoint outside it
+        `ARBITER_MODELS` may select a subset, and a request that routes to a checkpoint outside it
         should still be answered -- by the default one, saying so -- rather than rejected.
         """
         decision = dict(self.router.route(state, questions, model=model, task=task, lang=lang))
@@ -518,18 +518,18 @@ class Engine:
 
 
 def engine_from_env() -> Engine:
-    names = tuple(n.strip() for n in os.environ.get("LAYA_MODELS", ",".join(MODEL_NAMES)).split(",") if n.strip())
+    names = tuple(n.strip() for n in os.environ.get("ARBITER_MODELS", ",".join(MODEL_NAMES)).split(",") if n.strip())
     unknown = [n for n in names if n not in SUBFOLDER]
     if unknown:
-        raise ValueError("LAYA_MODELS contains unknown checkpoints: %s" % unknown)
+        raise ValueError("ARBITER_MODELS contains unknown checkpoints: %s" % unknown)
     return Engine(
-        models_dir=os.environ.get("LAYA_MODELS_DIR", "models/laya"),
+        models_dir=os.environ.get("ARBITER_MODELS_DIR", "models/laya"),
         names=names,
         device=os.environ.get("DEVICE", "cuda"),
-        mode=os.environ.get("LAYA_MODE", "eager"),
-        max_batch=int(os.environ.get("LAYA_MAX_BATCH", "64")),
-        wait_ms=float(os.environ.get("LAYA_BATCH_WAIT_MS", "2")),
-        max_queue=int(os.environ.get("LAYA_MAX_QUEUE", "256")),
-        max_markers=int(os.environ.get("LAYA_GRAPH_MAX_MARKERS", "32")),
-        dtype_mode=os.environ.get("LAYA_DTYPE", "autocast"),
+        mode=os.environ.get("ARBITER_MODE", "eager"),
+        max_batch=int(os.environ.get("ARBITER_MAX_BATCH", "64")),
+        wait_ms=float(os.environ.get("ARBITER_BATCH_WAIT_MS", "2")),
+        max_queue=int(os.environ.get("ARBITER_MAX_QUEUE", "256")),
+        max_markers=int(os.environ.get("ARBITER_GRAPH_MAX_MARKERS", "32")),
+        dtype_mode=os.environ.get("ARBITER_DTYPE", "autocast"),
     )

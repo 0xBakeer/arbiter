@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A PreToolUse hook that asks a local Laya server whether a Bash command is safe to run.
+"""A PreToolUse hook that asks a local arbiter server whether a Bash command is safe to run.
 
 Claude Code sends the tool call as JSON on stdin and reads a decision as JSON on stdout. This
 hook turns that into five questions in one forward pass -- destructive, secrets, outside the
@@ -11,16 +11,16 @@ standing between "the agent works without interruption" and "the agent asks abou
 
 Environment:
 
-    LAYA_URL                 default http://localhost:8010
-    LAYA_API_KEY             optional bearer token
-    LAYA_GUARD_TIMEOUT       seconds to wait for the server, default 3
-    LAYA_GUARD_FAIL_CLOSED   1 = ask the user when the server cannot be reached.
+    ARBITER_URL                 default http://localhost:8010
+    ARBITER_API_KEY             optional bearer token
+    ARBITER_GUARD_TIMEOUT       seconds to wait for the server, default 3
+    ARBITER_GUARD_FAIL_CLOSED   1 = ask the user when the server cannot be reached.
                              The default is fail-open: a decision server that is down must not
                              silently stop the session, so it logs and gets out of the way.
-    LAYA_GUARD_NO_AUTO_ALLOW 1 = never emit "allow"; on a clean verdict the hook says nothing
+    ARBITER_GUARD_NO_AUTO_ALLOW 1 = never emit "allow"; on a clean verdict the hook says nothing
                              and the normal permission flow applies. More conservative, and
                              what to use if you do not want this hook widening what may run.
-    LAYA_GUARD_LOG           append a line per decision to this file
+    ARBITER_GUARD_LOG           append a line per decision to this file
 """
 import json
 import os
@@ -29,14 +29,14 @@ import time
 import urllib.error
 import urllib.request
 
-LAYA_URL = os.environ.get("LAYA_URL", "http://localhost:8010").rstrip("/")
-LAYA_API_KEY = os.environ.get("LAYA_API_KEY")
-TIMEOUT = float(os.environ.get("LAYA_GUARD_TIMEOUT", "3"))
-FAIL_CLOSED = os.environ.get("LAYA_GUARD_FAIL_CLOSED") == "1"
-NO_AUTO_ALLOW = os.environ.get("LAYA_GUARD_NO_AUTO_ALLOW") == "1"
-LOG = os.environ.get("LAYA_GUARD_LOG")
+ARBITER_URL = os.environ.get("ARBITER_URL", "http://localhost:8010").rstrip("/")
+ARBITER_API_KEY = os.environ.get("ARBITER_API_KEY")
+TIMEOUT = float(os.environ.get("ARBITER_GUARD_TIMEOUT", "3"))
+FAIL_CLOSED = os.environ.get("ARBITER_GUARD_FAIL_CLOSED") == "1"
+NO_AUTO_ALLOW = os.environ.get("ARBITER_GUARD_NO_AUTO_ALLOW") == "1"
+LOG = os.environ.get("ARBITER_GUARD_LOG")
 
-# The same question set as examples/tool_call_guard.py and integrations/mcp/laya_mcp.py. It is
+# The same question set as examples/tool_call_guard.py and integrations/mcp/arbiter_mcp.py. It is
 # repeated rather than imported because a plugin directory gets copied around on its own.
 QUESTIONS = {
     "is_destructive": {
@@ -91,7 +91,7 @@ def log(message):
 def emit(decision, reason):
     """Write the PreToolUse decision and stop.
 
-    An "allow" with LAYA_GUARD_NO_AUTO_ALLOW set becomes silence, which is not the same thing:
+    An "allow" with ARBITER_GUARD_NO_AUTO_ALLOW set becomes silence, which is not the same thing:
     silence means "no opinion, run the normal permission flow", while "allow" skips it.
     """
     log("%s: %s" % (decision, reason))
@@ -104,12 +104,12 @@ def emit(decision, reason):
     sys.exit(0)
 
 
-def ask_laya(state):
+def ask_arbiter(state):
     body = json.dumps({"state": state, "questions": QUESTIONS, "model": "auto"}).encode()
     headers = {"content-type": "application/json"}
-    if LAYA_API_KEY:
-        headers["authorization"] = "Bearer %s" % LAYA_API_KEY
-    request = urllib.request.Request(LAYA_URL + "/v1/systemone", data=body, headers=headers,
+    if ARBITER_API_KEY:
+        headers["authorization"] = "Bearer %s" % ARBITER_API_KEY
+    request = urllib.request.Request(ARBITER_URL + "/v1/systemone", data=body, headers=headers,
                                      method="POST")
     with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
         return json.loads(response.read().decode())
@@ -122,18 +122,18 @@ def decide(answers):
     blast = signal["blast_radius"]
 
     if signal["touches_secrets"] >= DENY_SECRETS:
-        return "deny", "Laya: this reads or moves credentials (%.2f)." % signal["touches_secrets"]
+        return "deny", "Arbiter: this reads or moves credentials (%.2f)." % signal["touches_secrets"]
     if blast >= DENY_BLAST:
-        return "deny", ("Laya: blast radius %.2f of 3 -- shared or production systems." % blast)
+        return "deny", ("Arbiter: blast radius %.2f of 3 -- shared or production systems." % blast)
     if signal["is_destructive"] >= DENY_DESTRUCTIVE and blast >= 2.0:
-        return "deny", ("Laya: destructive (%.2f) with a machine-wide blast radius (%.2f)."
+        return "deny", ("Arbiter: destructive (%.2f) with a machine-wide blast radius (%.2f)."
                         % (signal["is_destructive"], blast))
 
     hot = {k: v for k, v in signal.items() if k != "blast_radius" and v >= ASK_SIGNAL}
     if hot or blast >= ASK_BLAST:
         detail = ", ".join("%s %.2f" % kv for kv in sorted(hot.items(), key=lambda kv: -kv[1]))
-        return "ask", "Laya: %s (blast radius %.2f of 3)." % (detail or "elevated risk", blast)
-    return "allow", ("Laya: nothing above %.2f, blast radius %.2f of 3."
+        return "ask", "Arbiter: %s (blast radius %.2f of 3)." % (detail or "elevated risk", blast)
+    return "allow", ("Arbiter: nothing above %.2f, blast radius %.2f of 3."
                      % (ASK_SIGNAL, blast))
 
 
@@ -154,13 +154,13 @@ def main():
         state["intent"] = description
 
     try:
-        response = ask_laya(state)
+        response = ask_arbiter(state)
     except (urllib.error.URLError, OSError, ValueError) as exc:
         log("unreachable: %s" % exc)
         if FAIL_CLOSED:
-            emit("ask", "Laya guard could not reach %s (%s); asking rather than guessing."
-                 % (LAYA_URL, exc))
-        print("laya guard: %s unreachable (%s); allowing" % (LAYA_URL, exc), file=sys.stderr)
+            emit("ask", "Arbiter guard could not reach %s (%s); asking rather than guessing."
+                 % (ARBITER_URL, exc))
+        print("arbiter guard: %s unreachable (%s); allowing" % (ARBITER_URL, exc), file=sys.stderr)
         sys.exit(0)
 
     emit(*decide(response["answers"]))

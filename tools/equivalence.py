@@ -124,10 +124,10 @@ def strip_single(d: Dict[str, Dict]) -> Dict[str, Dict]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models-dir", default=os.environ.get("LAYA_MODELS_DIR", "models/laya"))
+    ap.add_argument("--models-dir", default=os.environ.get("ARBITER_MODELS_DIR", "models/laya"))
     ap.add_argument("--device", default=os.environ.get("DEVICE", "cuda"))
-    ap.add_argument("--models", default=os.environ.get("LAYA_MODELS", ",".join(SUBFOLDER)))
-    ap.add_argument("--max-markers", type=int, default=int(os.environ.get("LAYA_GRAPH_MAX_MARKERS", "32")))
+    ap.add_argument("--models", default=os.environ.get("ARBITER_MODELS", ",".join(SUBFOLDER)))
+    ap.add_argument("--max-markers", type=int, default=int(os.environ.get("ARBITER_GRAPH_MAX_MARKERS", "32")))
     ap.add_argument("--dtypes", default="autocast,bf16", help="which parameter modes to compare")
     ap.add_argument("--out", default=None, help="append the markdown table to this file")
     args = ap.parse_args()

@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 import _cli
-from laya_client import LayaClient, Noul, Score
+from arbiter_client import ArbiterClient, Noul, Score
 
 QUESTIONS = {
     "touches_prod_credentials": Noul(
@@ -131,7 +131,7 @@ def main() -> int:
     args = p.parse_args()
     diff = read_diff(args)
     state = build_state(diff, args.description)
-    response = LayaClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
+    response = ArbiterClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
     if args.json:
         return _cli.dump(response)
     action, reason = decide(response)

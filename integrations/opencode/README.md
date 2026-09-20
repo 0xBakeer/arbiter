@@ -10,18 +10,18 @@ together), `environment`, and `enabled`. There is no separate `args` key.
 ```json
 {
   "mcp": {
-    "laya": {
+    "arbiter": {
       "type": "local",
-      "command": ["laya-mcp"],
-      "environment": { "LAYA_URL": "http://localhost:8010" }
+      "command": ["arbiter-mcp"],
+      "environment": { "ARBITER_URL": "http://localhost:8010" }
     }
   }
 }
 ```
 
-is the shorter form once `pip install /ABS/PATH/integrations/mcp` has put `laya-mcp` on your
+is the shorter form once `pip install /ABS/PATH/integrations/mcp` has put `arbiter-mcp` on your
 PATH.
 
 Every MCP server costs context, so five small tools is about the right budget. If you only want
 the guard, there is no way to expose a subset from the config -- run a second copy of the server
-behind a wrapper that only registers `laya_gate`, or just tell the agent which tool to use.
+behind a wrapper that only registers `arbiter_gate`, or just tell the agent which tool to use.

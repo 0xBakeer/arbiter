@@ -1,11 +1,11 @@
 # Patterns
 
 Five shapes that cover almost everything people build on a System One model. Each sketch uses
-[`examples/laya_client.py`](../examples/laya_client.py) and is short enough to paste.
+[`examples/arbiter_client.py`](../examples/arbiter_client.py) and is short enough to paste.
 
 ```python
-from laya_client import LayaClient, Choice, Noul, Score
-laya = LayaClient()                      # LAYA_URL, default http://localhost:8010
+from arbiter_client import ArbiterClient, Choice, Noul, Score
+arbiter = ArbiterClient()                      # ARBITER_URL, default http://localhost:8010
 ```
 
 ---
@@ -18,7 +18,7 @@ questions cost about what one costs. Asking three questions in three requests is
 do one request.
 
 ```python
-r = laya.system_one(ticket, {
+r = arbiter.system_one(ticket, {
     "department":  Choice("Which team owns this?", {"billing": "payments", "tech": "bugs"}),
     "urgency":     Score("How fast must we reply?", ["no rush", "this week", "today", "now"]),
     "refund":      Noul("The customer is asking for their money back."),
@@ -65,7 +65,7 @@ because each has its own threshold and its own consequence, and because you can 
 fired.
 
 ```python
-r = laya.system_one(diff, {
+r = arbiter.system_one(diff, {
     "credentials": Noul("This change exposes production credentials."),
     "migration":   Noul("This change contains a database migration."),
     "infra":       Noul("This change alters infrastructure other teams depend on."),
@@ -96,9 +96,9 @@ AREAS = {"billing": "payments and invoices", "product": "the app itself",
 BILLING = {"refund": "wants money back", "invoice": "wants a document",
            "pricing": "asking what things cost", "failed_payment": "a charge did not go through"}
 
-area = laya.system_one(message, {"a": Choice("Which area?", AREAS)}).choice("a")
+area = arbiter.system_one(message, {"a": Choice("Which area?", AREAS)}).choice("a")
 if area == "billing":
-    intent = laya.system_one(message, {"i": Choice("Which billing intent?", BILLING)}).choice("i")
+    intent = arbiter.system_one(message, {"i": Choice("Which billing intent?", BILLING)}).choice("i")
 ```
 
 ---
@@ -111,14 +111,14 @@ model can be an LLM served on the same box -- and the same encoder that routed t
 check the answer that comes back.
 
 ```python
-r = laya.system_one(request, {
+r = arbiter.system_one(request, {
     "complexity": Score("How much reasoning does this take?",
                         ["a lookup", "a short answer", "multi-step", "open-ended"]),
     "tools":      Noul("Answering this requires calling tools."),
 })
 if r.score("complexity") <= 0.9 and r.noul("tools") < 0.4:
     answer = fast_model(request)                        # the LLM next door
-    ok = laya.system_one({"request": request, "answer": answer},
+    ok = arbiter.system_one({"request": request, "answer": answer},
                          {"good": Noul("This answer is correct and complete.")}).noul("good")
     answer = answer if ok >= 0.7 else powerful_model(request)
 else:

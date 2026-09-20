@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Laya playground</title>
+<title>arbiter playground</title>
 <meta name="description" content="Try the Laya decision model: send a state and typed questions, get typed answers with calibrated probabilities in one forward pass.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -248,7 +248,7 @@ footer a:hover { color: var(--ink); }
 </head>
 <body>
 <header class="top wrap">
-  <div class="brand"><span class="wordmark">laya-spark</span><span class="sub">playground</span></div>
+  <div class="brand"><span class="wordmark">arbiter</span><span class="sub">playground</span></div>
   <button class="status" id="statusBtn" aria-expanded="false" aria-controls="server" title="Server settings">
     <span class="dot" id="dot"></span><span id="statusText">checking the server</span>
   </button>
@@ -470,7 +470,7 @@ Hi, I was billed on the 3rd and again on the 5th for the Pro plan. I have alread
       p2: 'You can have two active keys at once. Create the new key, deploy it to all clients, then delete the old one. Both keys are accepted during the overlap.',
       p3: 'Revoking a key takes effect immediately. Any client still using it will receive 401 responses until it is updated.',
       p4: 'Invoices are generated on the first of the month and include usage across all keys in the organisation.',
-      p5: 'Keys are read from the LAYA_API_KEY environment variable. Restart the process after changing it.' } },
+      p5: 'Keys are read from the ARBITER_API_KEY environment variable. Restart the process after changing it.' } },
   questions: {
     p1: { type: 'noul', instructions: 'Does passage p1 help answer the query?' },
     p2: { type: 'noul', instructions: 'Does passage p2 help answer the query?' },
@@ -606,7 +606,7 @@ const T = () => tabs[cur];
 
 /* ---------- header: theme, server ---------- */
 const root = document.documentElement;
-(function initTheme() { const t = store.get('laya.theme'); if (t) root.dataset.theme = t; paintThemeIcon(); })();
+(function initTheme() { const t = store.get('arbiter.theme'); if (t) root.dataset.theme = t; paintThemeIcon(); })();
 function paintThemeIcon() {
   const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   $('themeBtn').innerHTML = dark
@@ -615,21 +615,21 @@ function paintThemeIcon() {
 }
 $('themeBtn').onclick = () => {
   const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-  root.dataset.theme = dark ? 'light' : 'dark'; store.set('laya.theme', root.dataset.theme); paintThemeIcon();
+  root.dataset.theme = dark ? 'light' : 'dark'; store.set('arbiter.theme', root.dataset.theme); paintThemeIcon();
 };
 
 const servedSameOrigin = location.protocol.startsWith('http');
 const baseInput = $('base'), keyInput = $('key'), rememberBox = $('remember');
-baseInput.value = store.get('laya.base') || (servedSameOrigin ? location.origin : 'http://localhost:8010');
-rememberBox.checked = store.get('laya.remember') === '1';
-if (rememberBox.checked) keyInput.value = store.get('laya.key') || '';
+baseInput.value = store.get('arbiter.base') || (servedSameOrigin ? location.origin : 'http://localhost:8010');
+rememberBox.checked = store.get('arbiter.remember') === '1';
+if (rememberBox.checked) keyInput.value = store.get('arbiter.key') || '';
 $('serverNote').textContent = servedSameOrigin
-  ? 'This page is served by the Laya server, so the same origin works without any setup. Point it elsewhere only if that server allows cross-origin requests.'
-  : 'This page was opened from disk, so the server must allow cross-origin requests (playground/serve_stub.py does; a bare laya-spark server does not).';
+  ? 'This page is served by the arbiter server, so the same origin works without any setup. Point it elsewhere only if that server allows cross-origin requests.'
+  : 'This page was opened from disk, so the server must allow cross-origin requests (playground/serve_stub.py does; a bare arbiter server does not).';
 const base = () => baseInput.value.trim().replace(/\/+$/, '');
-baseInput.addEventListener('change', () => { store.set('laya.base', base()); checkReady(); });
-rememberBox.addEventListener('change', () => { store.set('laya.remember', rememberBox.checked ? '1' : '0'); if (rememberBox.checked) store.set('laya.key', keyInput.value); else store.del('laya.key'); });
-keyInput.addEventListener('input', () => { if (rememberBox.checked) store.set('laya.key', keyInput.value); });
+baseInput.addEventListener('change', () => { store.set('arbiter.base', base()); checkReady(); });
+rememberBox.addEventListener('change', () => { store.set('arbiter.remember', rememberBox.checked ? '1' : '0'); if (rememberBox.checked) store.set('arbiter.key', keyInput.value); else store.del('arbiter.key'); });
+keyInput.addEventListener('input', () => { if (rememberBox.checked) store.set('arbiter.key', keyInput.value); });
 $('statusBtn').onclick = () => { const s = $('server'); s.hidden = !s.hidden; $('statusBtn').setAttribute('aria-expanded', String(!s.hidden)); if (!s.hidden) baseInput.focus(); };
 
 function headers() { const h = { 'content-type': 'application/json' }; if (keyInput.value.trim()) h['authorization'] = 'Bearer ' + keyInput.value.trim(); return h; }
@@ -781,7 +781,7 @@ function renderError(status, j, raw) {
   else if (status === 401) { title = 'The server wants an API key (401)'; help = 'Open the server settings by clicking the status in the header and enter the key.'; }
   else if (status === 503) { title = 'The server is still loading (503)'; help = 'The checkpoints are being loaded; the header dot turns blue when it is ready.'; }
   else if (status === 529) { title = 'The server is overloaded (529)'; help = 'The batch queue is full; try again in a moment.'; }
-  else if (status === 0) { title = 'Could not reach ' + base(); help = servedSameOrigin ? 'Is the server running?' : 'The page was opened from disk. Either serve it from the Laya server itself (same origin), or run playground/serve_stub.py, which adds cross-origin headers.'; }
+  else if (status === 0) { title = 'Could not reach ' + base(); help = servedSameOrigin ? 'Is the server running?' : 'The page was opened from disk. Either serve it from the arbiter server itself (same origin), or run playground/serve_stub.py, which adds cross-origin headers.'; }
   else { title = 'The server answered ' + status; }
   $('out').innerHTML = `<div class="error"><h3>${esc(title)}</h3><p><code>${esc(msg)}</code></p>${help ? `<p>${esc(help)}</p>` : ''}</div>`;
 }
@@ -851,7 +851,7 @@ function decisionHtml(res, a, t, wall) {
 /* ---------- copy helpers ---------- */
 function curlFor(req) {
   const body = JSON.stringify(req, null, 2).replace(/'/g, "'\\''");
-  const key = keyInput.value.trim() ? "  -H 'authorization: Bearer $LAYA_API_KEY' \\\n" : '';
+  const key = keyInput.value.trim() ? "  -H 'authorization: Bearer $ARBITER_API_KEY' \\\n" : '';
   return `curl -s ${base()}/v1/systemone \\\n  -H 'content-type: application/json' \\\n${key}  -d '${body}'`;
 }
 function py(v, ind) {
@@ -864,7 +864,7 @@ function py(v, ind) {
 }
 function pythonFor(req) {
   const key = keyInput.value.trim();
-  return `import requests\n\nr = requests.post(\n    "${base()}/v1/systemone",\n    json=${py(req, 1)},\n${key ? '    headers={"Authorization": "Bearer " + LAYA_API_KEY},\n' : ''})\nr.raise_for_status()\nfor qid, ans in r.json()["answers"].items():\n    print(qid, ans)\n`;
+  return `import requests\n\nr = requests.post(\n    "${base()}/v1/systemone",\n    json=${py(req, 1)},\n${key ? '    headers={"Authorization": "Bearer " + ARBITER_API_KEY},\n' : ''})\nr.raise_for_status()\nfor qid, ans in r.json()["answers"].items():\n    print(qid, ans)\n`;
 }
 async function copyText(btn, text) {
   let ok = false;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure a running laya-spark server: latency by question count, throughput by concurrency.
+"""Measure a running arbiter server: latency by question count, throughput by concurrency.
 
 Shape (a) matches the table the model card publishes for a T4 -- 1, 5, 10 and 50 questions in
 one call -- so the two can be read side by side. Shape (b) is what the T4 table does not answer:
@@ -123,11 +123,11 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8010")
-    ap.add_argument("--key", default=os.environ.get("LAYA_API_KEY") or None)
+    ap.add_argument("--key", default=os.environ.get("ARBITER_API_KEY") or None)
     ap.add_argument("--model", default=None, help="pin a checkpoint instead of auto-routing")
     ap.add_argument("--calls", type=int, default=30)
     ap.add_argument("--seconds", type=float, default=10.0)
-    ap.add_argument("--label", default=os.environ.get("LAYA_MODE", "eager"))
+    ap.add_argument("--label", default=os.environ.get("ARBITER_MODE", "eager"))
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "results.md"))
     args = ap.parse_args()
 
@@ -166,7 +166,7 @@ def main():
                "models": info.get("models"), "version": info.get("version"),
                "latency": rows, "throughput": conc}
 
-    md = ["", "## %s -- %s, `LAYA_MODE=%s`, `LAYA_DTYPE=%s`"
+    md = ["", "## %s -- %s, `ARBITER_MODE=%s`, `ARBITER_DTYPE=%s`"
           % (payload["date"], gpu, payload["mode"], payload["dtype"]), "",
           "Checkpoints loaded: %s. Server version %s." % (", ".join(payload["models"] or []), payload["version"]),
           "", "### Latency, one caller, auto-routed English state", "",

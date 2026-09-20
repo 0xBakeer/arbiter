@@ -91,7 +91,7 @@ and the escalation rule is a single line of Python over the five numbers.
 ### Output
 
 ```
-Laya · support triage                                  english · 40.4 ms · 598 tok
+Arbiter · support triage                                  english · 40.4 ms · 598 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   department               billing              ██████████████    1.00  conf 1.00
@@ -166,7 +166,7 @@ caller saying a word about language.
 ### Output
 
 ```
-Laya · email triage                                    english · 37.1 ms · 578 tok
+Arbiter · email triage                                    english · 37.1 ms · 578 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   category                 spam                 ████████░░░░░░    0.57  conf 0.61
@@ -179,7 +179,7 @@ Laya · email triage                                    english · 37.1 ms · 57
 ```
 
 ```
-Laya · email triage                               multilingual · 21.8 ms · 674 tok
+Arbiter · email triage                               multilingual · 21.8 ms · 674 tok
   routed: Latin script but language looks like 'de', not English
 ──────────────────────────────────────────────────────────────────────────────────
   category                 transaction          ██████████████    1.00  conf 1.00
@@ -191,7 +191,7 @@ Laya · email triage                               multilingual · 21.8 ms · 67
 ```
 
 ```
-Laya · email triage                               multilingual · 21.1 ms · 602 tok
+Arbiter · email triage                               multilingual · 21.1 ms · 602 tok
   routed: non-Latin script (devanagari, 81% of letters); the English checkpoint c…
 ──────────────────────────────────────────────────────────────────────────────────
   category                 notification         █████░░░░░░░░░    0.33  conf 0.16
@@ -265,7 +265,7 @@ command that goes straight through.
 ### Output
 
 ```
-Laya · tool-call guard                                 english · 35.5 ms · 571 tok
+Arbiter · tool-call guard                                 english · 35.5 ms · 571 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   is_destructive           yes                  ████████░░░░░░    0.58  conf 0.58
@@ -279,7 +279,7 @@ Laya · tool-call guard                                 english · 35.5 ms · 57
 ```
 
 ```
-Laya · tool-call guard                                 english · 33.1 ms · 506 tok
+Arbiter · tool-call guard                                 english · 33.1 ms · 506 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   is_destructive           yes                  █████████░░░░░    0.64  conf 0.64
@@ -293,7 +293,7 @@ Laya · tool-call guard                                 english · 33.1 ms · 50
 ```
 
 ```
-Laya · tool-call guard                                 english · 30.7 ms · 386 tok
+Arbiter · tool-call guard                                 english · 30.7 ms · 386 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   is_destructive           no                   ███████░░░░░░░    0.48  conf 0.52
@@ -368,7 +368,7 @@ a CI job needs: 0 allow, 1 review, 2 block.
 ### Output
 
 ```
-Laya · PR risk gate                                   english · 95.9 ms · 2353 tok
+Arbiter · PR risk gate                                   english · 95.9 ms · 2353 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   touches_prod_credentials no                   █████░░░░░░░░░    0.36  conf 0.64
@@ -451,7 +451,7 @@ compare against. Duplicate wins over severity: a loud duplicate is still a dupli
 ### Output
 
 ```
-Laya · alert triage                                   english · 53.3 ms · 1081 tok
+Arbiter · alert triage                                   english · 53.3 ms · 1081 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   service                  checkout             █████████████░    0.95  conf 0.88
@@ -516,7 +516,7 @@ model and checks its answer before showing it.
 ### Output
 
 ```
-Laya · model router                                    english · 30.5 ms · 420 tok
+Arbiter · model router                                    english · 30.5 ms · 420 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   complexity               a short answer with… ██████░░░░░░░░  1.21/3  conf 0.31
@@ -562,7 +562,7 @@ questions = {"p0": Noul(COARSE.format(pid="p0")), "p1": Noul(COARSE.format(pid="
 ### Output
 
 ```
-Laya · rag relevance                                   english · 26.9 ms · 280 tok
+Arbiter · rag relevance                                   english · 26.9 ms · 280 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   query: How do I rotate the API signing key without downtime?
@@ -644,7 +644,7 @@ a leaked phone number and an off-topic ramble need four different responses.
 ### Output
 
 ```
-Laya · moderation                                      english · 34.3 ms · 549 tok
+Arbiter · moderation                                      english · 34.3 ms · 549 tok
   routed: English Latin text
 ──────────────────────────────────────────────────────────────────────────────────
   jailbreak                yes                  ████████████░░    0.84  conf 0.84
@@ -724,7 +724,7 @@ question about one document.
 ### Output
 
 ```
-Laya · invoice fields                         typed-decisions · 76.5 ms · 1710 tok
+Arbiter · invoice fields                         typed-decisions · 76.5 ms · 1710 tok
   routed: explicit task='typed_decisions'
 ──────────────────────────────────────────────────────────────────────────────────
   currency                 EUR                  ██████████░░░░    0.69  conf 0.48

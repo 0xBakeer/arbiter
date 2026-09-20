@@ -10,4 +10,4 @@ class OptionBudgetError(ValueError):
 
 
 class OverloadedError(RuntimeError):
-    """More question rows in flight than `LAYA_MAX_QUEUE` allows. Answered with 529."""
+    """More question rows in flight than `ARBITER_MAX_QUEUE` allows. Answered with 529."""

@@ -1,10 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "laya-decisions",
-  "displayName": "Laya Decisions",
+  "name": "arbiter",
+  "displayName": "Arbiter",
   "version": "0.1.0",
-  "description": "Fast typed decisions from a self-hosted Laya System One server: classify, score, check, and a PreToolUse guard on Bash.",
+  "description": "Fast typed decisions from a self-hosted arbiter server: classify, score, check, and a PreToolUse guard on Bash.",
   "license": "MIT",
-  "author": {"name": "0xBakeer", "url": "https://github.com/0xBakeer/laya-spark"},
-  "keywords": ["laya", "jev", "system-one", "classification", "guardrails", "safety"]
+  "author": {"name": "0xBakeer", "url": "https://github.com/0xBakeer/arbiter"},
+  "keywords": ["arbiter", "laya", "jev", "system-one", "classification", "guardrails", "safety"]
 }

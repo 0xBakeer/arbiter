@@ -1,6 +1,6 @@
 ---
-name: laya-decisions
-description: Use the laya MCP tools (laya_check, laya_classify, laya_score, laya_gate, laya_decide) to make fast, typed decisions instead of reasoning about routine judgements. Use when triaging, classifying, ranking, filtering, or deciding whether an action is safe, and when the same judgement has to be made over many items.
+name: arbiter-decisions
+description: Use the arbiter MCP tools (arbiter_check, arbiter_classify, arbiter_score, arbiter_gate, arbiter_decide) to make fast, typed decisions instead of reasoning about routine judgements. Use when triaging, classifying, ranking, filtering, or deciding whether an action is safe, and when the same judgement has to be made over many items.
 ---
 
 # Deciding with Laya instead of thinking about it
@@ -25,19 +25,19 @@ nothing else.
 
 | Tool | Answers | Use it for |
 |---|---|---|
-| `laya_check` | one probability, 0-1 | "is this true of the state?" -- the strongest primitive |
-| `laya_classify` | one of up to 12 labels, plus the distribution | routing, intent, category, owner |
-| `laya_score` | a float on a 2-10 level scale | severity, urgency, size, blast radius |
-| `laya_gate` | allow / confirm / block plus five signals | before running a destructive action |
-| `laya_decide` | everything above, batched | more than one question about one state |
+| `arbiter_check` | one probability, 0-1 | "is this true of the state?" -- the strongest primitive |
+| `arbiter_classify` | one of up to 12 labels, plus the distribution | routing, intent, category, owner |
+| `arbiter_score` | a float on a 2-10 level scale | severity, urgency, size, blast radius |
+| `arbiter_gate` | allow / confirm / block plus five signals | before running a destructive action |
+| `arbiter_decide` | everything above, batched | more than one question about one state |
 
-**Default to `laya_decide`.** Every question in a call is a row in the same batch, so ten
+**Default to `arbiter_decide`.** Every question in a call is a row in the same batch, so ten
 questions cost roughly what one costs. Ask everything you might want to know at once, then let
 your own logic combine the answers. Two sequential calls are the slow way to do one call.
 
 **Prefer a check to a score.** An ordinal scale is the weakest of the three: the model has to
 agree with you about what the middle means. If there is a boundary you actually care about,
-phrase the boundary as a statement and use `laya_check`: "this change needs a database
+phrase the boundary as a statement and use `arbiter_check`: "this change needs a database
 migration" beats a 0-3 "how risky is this change" plus a cutoff.
 
 ## Write the state like a record, not a paragraph
@@ -63,7 +63,7 @@ the model from using its own definition of a word like "urgent" or "destructive"
 
 ## Respect the option budget
 
-`laya_classify` takes at most 12 options here, and the tool will refuse more. Option
+`arbiter_classify` takes at most 12 options here, and the tool will refuse more. Option
 descriptions share a fixed token budget with the state, so a long list does not merely cost
 more, it gets less accurate. For a large taxonomy, classify coarsely first and then classify
 again inside the winning group. Two forward passes still beat one model call.
@@ -85,7 +85,7 @@ you.
 
 ## Before you run something destructive
 
-Call `laya_gate` with the command and a sentence of context. It returns `allow`, `confirm` or
+Call `arbiter_gate` with the command and a sentence of context. It returns `allow`, `confirm` or
 `block` plus the five signals behind it. Treat `confirm` as "ask the user, quoting the signal",
 not as "probably fine". If the server is not reachable, the gate raises an error: that is not
 permission to proceed, it is a missing opinion.

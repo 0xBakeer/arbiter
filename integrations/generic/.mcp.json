@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "laya": {
+    "arbiter": {
       "command": "python3",
-      "args": ["/ABS/PATH/integrations/mcp/laya_mcp.py"],
+      "args": ["/ABS/PATH/integrations/mcp/arbiter_mcp.py"],
       "env": {
-        "LAYA_URL": "http://localhost:8010",
-        "LAYA_MODEL": "auto"
+        "ARBITER_URL": "http://localhost:8010",
+        "ARBITER_MODEL": "auto"
       }
     }
   }

@@ -7,7 +7,7 @@
 
 The stub answers with stable pseudo-random probabilities in exactly the shapes the real server
 produces. With `--proxy` the page is still served from here (same origin), which is the way to
-use a bare laya-spark server from a page that was not mounted on it.
+use a bare arbiter server from a page that was not mounted on it.
 """
 import hashlib
 import json

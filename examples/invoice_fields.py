@@ -20,7 +20,7 @@ different number, the same number arrives with a different total.
 import sys
 
 import _cli
-from laya_client import Choice, LayaClient, Noul, Score
+from arbiter_client import Choice, ArbiterClient, Noul, Score
 
 QUESTIONS = {
     "currency": Choice(
@@ -105,7 +105,7 @@ def main() -> int:
     # `task` is the server's router hint. Left on "auto" this example opts in to the
     # typed-decisions checkpoint; naming a model on the command line overrides it.
     task = "typed_decisions" if args.model == "auto" else None
-    response = LayaClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model,
+    response = ArbiterClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model,
                                                         task=task)
     if args.json:
         return _cli.dump(response)

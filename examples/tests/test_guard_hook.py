@@ -42,7 +42,7 @@ SAFE = {"is_destructive": noul(0.03), "touches_secrets": noul(0.02), "leaves_rep
 
 
 def run(event, url, **env):
-    environment = dict(os.environ, LAYA_URL=url)
+    environment = dict(os.environ, ARBITER_URL=url)
     environment.update(env)
     return subprocess.run([sys.executable, GUARD], input=json.dumps(event), capture_output=True,
                           text=True, env=environment, timeout=30)
@@ -96,7 +96,7 @@ def test_the_hook_emits_the_documented_json(answers, expected):
     payload = json.loads(done.stdout)["hookSpecificOutput"]
     assert payload["hookEventName"] == "PreToolUse"
     assert payload["permissionDecision"] == expected
-    assert payload["permissionDecisionReason"].startswith("Laya:")
+    assert payload["permissionDecisionReason"].startswith("Arbiter:")
 
 
 def test_the_command_and_the_directory_reach_the_server():
@@ -144,7 +144,7 @@ def test_an_unreachable_server_fails_open():
 
 
 def test_fail_closed_asks_instead():
-    done = run(bash(), "http://127.0.0.1:1", LAYA_GUARD_FAIL_CLOSED="1")
+    done = run(bash(), "http://127.0.0.1:1", ARBITER_GUARD_FAIL_CLOSED="1")
     payload = json.loads(done.stdout)["hookSpecificOutput"]
     assert payload["permissionDecision"] == "ask"
     assert "could not reach" in payload["permissionDecisionReason"]
@@ -152,17 +152,17 @@ def test_fail_closed_asks_instead():
 
 def test_no_auto_allow_turns_an_allow_into_silence():
     with StubServer(scripted=SAFE) as stub:
-        done = run(bash(), stub.url, LAYA_GUARD_NO_AUTO_ALLOW="1")
+        done = run(bash(), stub.url, ARBITER_GUARD_NO_AUTO_ALLOW="1")
     assert done.stdout == ""
     with StubServer(scripted=dict(SAFE, touches_secrets=noul(0.95))) as stub:
-        done = run(bash(), stub.url, LAYA_GUARD_NO_AUTO_ALLOW="1")
+        done = run(bash(), stub.url, ARBITER_GUARD_NO_AUTO_ALLOW="1")
     assert json.loads(done.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_the_log_file_records_the_decision(tmp_path):
     log = tmp_path / "guard.log"
     with StubServer(scripted=SAFE) as stub:
-        run(bash(), stub.url, LAYA_GUARD_LOG=str(log))
+        run(bash(), stub.url, ARBITER_GUARD_LOG=str(log))
     assert "allow" in log.read_text()
 
 
@@ -170,7 +170,7 @@ def test_the_log_file_records_the_decision(tmp_path):
 
 def test_the_plugin_files_are_valid_json_and_point_at_files_that_exist():
     manifest = json.load(open(os.path.join(PLUGIN, ".claude-plugin", "plugin.json")))
-    assert manifest["name"] == "laya-decisions"
+    assert manifest["name"] == "arbiter"
 
     hooks = json.load(open(os.path.join(PLUGIN, "hooks", "hooks.json")))
     entry = hooks["hooks"]["PreToolUse"][0]
@@ -179,14 +179,14 @@ def test_the_plugin_files_are_valid_json_and_point_at_files_that_exist():
     assert "${CLAUDE_PLUGIN_ROOT}/hooks/guard.py" in entry["hooks"][0]["command"]
 
     mcp = json.load(open(os.path.join(PLUGIN, ".mcp.json")))
-    args = mcp["mcpServers"]["laya"]["args"]
+    args = mcp["mcpServers"]["arbiter"]["args"]
     target = args[0].replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN)
     assert os.path.exists(target), target
 
 
 def test_the_skill_declares_a_name_and_a_description():
-    text = open(os.path.join(PLUGIN, "skills", "laya-decisions", "SKILL.md")).read()
+    text = open(os.path.join(PLUGIN, "skills", "arbiter-decisions", "SKILL.md")).read()
     assert text.startswith("---\n")
     front = text.split("---", 2)[1]
-    assert "name: laya-decisions" in front
+    assert "name: arbiter-decisions" in front
     assert "description:" in front

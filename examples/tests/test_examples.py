@@ -21,7 +21,7 @@ import pr_risk_gate
 import rag_relevance
 import support_triage
 import tool_call_guard
-from laya_client import LayaClient, Response
+from arbiter_client import ArbiterClient, Response
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SCRIPTS = ["support_triage", "email_triage", "tool_call_guard", "pr_risk_gate", "alert_triage",
@@ -268,7 +268,7 @@ def test_invoice_routes_a_large_one_to_an_approver():
 def test_rag_sends_passages_in_chunks_that_fit_the_read_window():
     passages = ["passage %d" % i for i in range(14)]
     with StubServer() as stub:
-        scores, _, stage = rag_relevance.rank(LayaClient(base_url=stub.url), "q", passages)
+        scores, _, stage = rag_relevance.rank(ArbiterClient(base_url=stub.url), "q", passages)
         chunks = [len(r["questions"]) for r in stub.requests]
     assert len(scores) == 14
     assert max(chunks) <= rag_relevance.CHUNK
@@ -277,14 +277,14 @@ def test_rag_sends_passages_in_chunks_that_fit_the_read_window():
 
 def test_rag_asks_once_when_there_are_few_passages():
     with StubServer() as stub:
-        _, _, stage = rag_relevance.rank(LayaClient(base_url=stub.url), "q", ["a", "b", "c"])
+        _, _, stage = rag_relevance.rank(ArbiterClient(base_url=stub.url), "q", ["a", "b", "c"])
         assert len(stub.requests) == 1
     assert "one pass" in stage
 
 
 def test_rag_keys_every_passage_into_the_shared_state():
     with StubServer() as stub:
-        rag_relevance.rank(LayaClient(base_url=stub.url), "q", ["a", "b"])
+        rag_relevance.rank(ArbiterClient(base_url=stub.url), "q", ["a", "b"])
         sent = stub.requests[0]
     assert sent["state"]["query"] == "q"
     assert sorted(sent["state"]["passages"]) == ["p0", "p1"]
@@ -294,7 +294,7 @@ def test_rag_keys_every_passage_into_the_shared_state():
 # --------------------------------------------------------------------- end to end
 
 def run(script, *args, url, stdin=""):
-    env = dict(os.environ, LAYA_URL=url, NO_COLOR="1", PYTHONPATH=os.path.join(ROOT, "examples"))
+    env = dict(os.environ, ARBITER_URL=url, NO_COLOR="1", PYTHONPATH=os.path.join(ROOT, "examples"))
     return subprocess.run([sys.executable, os.path.join(ROOT, "examples", script + ".py")] + list(args),
                           input=stdin, capture_output=True, text=True, env=env, timeout=60)
 
@@ -304,7 +304,7 @@ def test_every_example_runs_and_prints_a_route(script):
     with StubServer() as stub:
         done = run(script, url=stub.url)
     assert done.returncode in (0, 1, 2), done.stderr
-    assert "Laya" in done.stdout
+    assert "Arbiter" in done.stdout
     assert any(word in done.stdout for word in ("ROUTE", "MODEL", "AP", "RERANK")), done.stdout
     assert not done.stderr
 

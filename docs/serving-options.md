@@ -49,7 +49,7 @@ bf16 parameters are 15–35% faster (14.0 ms against 20.9 at one question; 380 q
 287 at concurrency 8). The trade was still refused. Laya's entire proposition is calibrated
 probabilities, the model card already warns they ship over-confident and need refitting
 (mean ECE 0.466 → 0.081), and six milliseconds off a twenty-millisecond answer is not worth
-2e-2 of the calibration budget. It is available as `LAYA_DTYPE=bf16` with the numbers next to it.
+2e-2 of the calibration budget. It is available as `ARBITER_DTYPE=bf16` with the numbers next to it.
 
 One implementation note for anyone who tries it: `act_head` has to stay fp32. It is fed
 `torch.cat([h[:, 0].float(), feats])`, so a bf16 weight meets an fp32 activation and the forward
@@ -62,8 +62,8 @@ as the model is on CUDA, and this path has to stay eager for graphs mode to be c
 thinks it is capturing.
 
 **Dynamic cross-request micro-batching.** A worker thread per checkpoint takes the first
-request's rows and then keeps draining the queue for `LAYA_BATCH_WAIT_MS` (default 2 ms) or
-until `LAYA_MAX_BATCH` rows are in hand, then runs one forward. Rows are independent — attention
+request's rows and then keeps draining the queue for `ARBITER_BATCH_WAIT_MS` (default 2 ms) or
+until `ARBITER_MAX_BATCH` rows are in hand, then runs one forward. Rows are independent — attention
 is masked per row, the head's `src_key_padding_mask` is per row, the marker gather is per row —
 so this cannot change what any single row computes beyond floating-point reassociation. That was
 the assumption, and it is the one the harness checked hardest: batching every question of every
@@ -96,7 +96,7 @@ The sequence ladder was the real cost: rows here are about 130 tokens, and a lad
 sequence to 15, markers to 9) took 306 ms to 229. Coarse buckets are a large and completely
 invisible tax, and they are easy to mistake for "CUDA graphs do not help here".
 
-Anything outside a bucket — a question with more options than `LAYA_GRAPH_MAX_MARKERS`, a batch
+Anything outside a bucket — a question with more options than `ARBITER_GRAPH_MAX_MARKERS`, a batch
 above 64 — takes the eager path, which is always there. Graphs are captured lazily on first use
 of a bucket, after a 3-iteration warm-up on a side stream, and they share one memory pool.
 Capture is plain `torch.cuda.CUDAGraph`, not `torch.compile(mode="reduce-overhead")`, so nothing

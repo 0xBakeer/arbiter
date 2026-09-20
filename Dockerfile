@@ -1,8 +1,8 @@
 # Not built by CI and not published anywhere; it is here so the dependency set is written down
 # somewhere executable. `./run.sh setup` on the host is the supported path.
 #
-#   docker build -t laya-spark .
-#   docker run --gpus all -p 8010:8010 -v "$PWD/models:/app/models" laya-spark
+#   docker build -t arbiter .
+#   docker run --gpus all -p 8010:8010 -v "$PWD/models:/app/models" arbiter
 #
 # The image does not carry the checkpoints. Mount them, or let the container download them on
 # first start with HF_TOKEN set.
@@ -34,10 +34,10 @@ COPY . /app
 ENV PORT=8010 \
     HOST=0.0.0.0 \
     DEVICE=cuda \
-    LAYA_MODE=eager \
-    LAYA_DTYPE=autocast \
-    LAYA_MODELS=english,multilingual,typed-decisions \
-    LAYA_MODELS_DIR=/app/models/laya
+    ARBITER_MODE=eager \
+    ARBITER_DTYPE=autocast \
+    ARBITER_MODELS=english,multilingual,typed-decisions \
+    ARBITER_MODELS_DIR=/app/models/laya
 
 EXPOSE 8010
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s \

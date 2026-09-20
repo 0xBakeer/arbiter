@@ -14,7 +14,7 @@ import sys
 import textwrap
 from typing import Any, Dict, Optional, Tuple
 
-from laya_client import LayaError
+from arbiter_client import ArbiterError
 
 WIDTH = 82
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -97,7 +97,7 @@ def _row_fields(answer: Dict[str, Any]) -> Tuple[str, float, str]:
 def header(title: str, response) -> None:
     ck = response.checkpoint
     badge = "%s%s%s" % (CHECKPOINT_COLOR.get(ck, ""), ck, RESET)
-    left = "%sLaya%s · %s" % (BOLD, RESET, title)
+    left = "%sArbiter%s · %s" % (BOLD, RESET, title)
     right = "%s · %s%.1f ms · %d tok%s" % (badge, DIM, response.latency_ms,
                                                      response.input_tokens, RESET)
     pad = max(1, WIDTH - len(strip_ansi(left)) - len(strip_ansi(right)))
@@ -148,7 +148,7 @@ def parser(description: str) -> argparse.ArgumentParser:
     p.add_argument("--state", metavar="FILE",
                    help="read the state from FILE ('-' or a pipe reads stdin)")
     p.add_argument("--url", default=None,
-                   help="server base URL (default $LAYA_URL or http://localhost:8010)")
+                   help="server base URL (default $ARBITER_URL or http://localhost:8010)")
     p.add_argument("--model", default="auto",
                    help="auto | laya-english | laya-multilingual | laya-typed-decisions")
     return p
@@ -189,8 +189,8 @@ def run(main) -> int:
     """
     try:
         return main()
-    except LayaError as exc:
-        print("laya: %s" % exc, file=sys.stderr)
+    except ArbiterError as exc:
+        print("arbiter: %s" % exc, file=sys.stderr)
         return 3
     except KeyboardInterrupt:                            # pragma: no cover - interactive only
         return 130

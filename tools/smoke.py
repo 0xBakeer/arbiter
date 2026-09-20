@@ -30,7 +30,7 @@ def main():
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8010")
-    ap.add_argument("--key", default=os.environ.get("LAYA_API_KEY") or None)
+    ap.add_argument("--key", default=os.environ.get("ARBITER_API_KEY") or None)
     args = ap.parse_args()
 
     headers = {"Authorization": "Bearer %s" % args.key} if args.key else {}
@@ -41,7 +41,7 @@ def main():
         print("readyz: %s %s" % (ready.status_code, ready.text.strip()))
 
         page = client.get("%s/" % args.base)
-        served = page.status_code == 200 and "laya-spark" in page.text
+        served = page.status_code == 200 and "arbiter" in page.text
         print("playground: %s %s" % (page.status_code, "ok" if served else "NOT SERVED"))
         if not served:
             failures.append("GET / -> HTTP %d, %d bytes" % (page.status_code, len(page.content)))

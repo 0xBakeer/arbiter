@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# laya-spark -- a Jev-compatible System One server over the Laya decision checkpoints.
+# arbiter -- a Jev-compatible System One server over the Laya decision checkpoints.
 #
 #   ./run.sh setup     create .venv, install torch (cu130) and the deps, fetch the checkpoints
 #   ./run.sh serve     start the server detached on $PORT, with a pid file and a log
@@ -22,30 +22,30 @@ VERSION="$(cat "$HERE/VERSION")"
 PORT="${PORT:-8010}"
 HOST="${HOST:-0.0.0.0}"
 DEVICE="${DEVICE:-cuda}"
-LAYA_MODELS="${LAYA_MODELS:-english,multilingual,typed-decisions}"
-LAYA_MODE="${LAYA_MODE:-eager}"
-LAYA_DTYPE="${LAYA_DTYPE:-autocast}"
-LAYA_API_KEY="${LAYA_API_KEY:-}"
-LAYA_BATCH_WAIT_MS="${LAYA_BATCH_WAIT_MS:-2}"
-LAYA_MAX_BATCH="${LAYA_MAX_BATCH:-64}"
-LAYA_MAX_QUEUE="${LAYA_MAX_QUEUE:-256}"
-LAYA_GRAPH_MAX_MARKERS="${LAYA_GRAPH_MAX_MARKERS:-32}"
+ARBITER_MODELS="${ARBITER_MODELS:-english,multilingual,typed-decisions}"
+ARBITER_MODE="${ARBITER_MODE:-eager}"
+ARBITER_DTYPE="${ARBITER_DTYPE:-autocast}"
+ARBITER_API_KEY="${ARBITER_API_KEY:-}"
+ARBITER_BATCH_WAIT_MS="${ARBITER_BATCH_WAIT_MS:-2}"
+ARBITER_MAX_BATCH="${ARBITER_MAX_BATCH:-64}"
+ARBITER_MAX_QUEUE="${ARBITER_MAX_QUEUE:-256}"
+ARBITER_GRAPH_MAX_MARKERS="${ARBITER_GRAPH_MAX_MARKERS:-32}"
 MODELS_DIR="${MODELS_DIR:-$HERE/models}"
-LAYA_MODELS_DIR="${LAYA_MODELS_DIR:-$MODELS_DIR/laya}"
+ARBITER_MODELS_DIR="${ARBITER_MODELS_DIR:-$MODELS_DIR/laya}"
 TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu130}"
 WORKERS="${WORKERS:-1}"
 
 VENV="$HERE/.venv"
 PY="$VENV/bin/python"
 LOGS="$HERE/logs"
-PIDFILE="$LOGS/laya.pid"
+PIDFILE="$LOGS/arbiter.pid"
 BASE="http://127.0.0.1:$PORT"
 
-export PORT HOST DEVICE LAYA_MODELS LAYA_MODE LAYA_DTYPE LAYA_API_KEY LAYA_BATCH_WAIT_MS LAYA_MAX_BATCH \
-       LAYA_MAX_QUEUE LAYA_GRAPH_MAX_MARKERS LAYA_MODELS_DIR
-export LAYA_SPARK_VERSION="$VERSION"
+export PORT HOST DEVICE ARBITER_MODELS ARBITER_MODE ARBITER_DTYPE ARBITER_API_KEY ARBITER_BATCH_WAIT_MS ARBITER_MAX_BATCH \
+       ARBITER_MAX_QUEUE ARBITER_GRAPH_MAX_MARKERS ARBITER_MODELS_DIR
+export ARBITER_VERSION="$VERSION"
 
-banner() { echo "laya-spark $VERSION -- $1"; }
+banner() { echo "arbiter $VERSION -- $1"; }
 
 need_venv() {
   [ -x "$PY" ] || { echo "no .venv yet; run ./run.sh setup" >&2; exit 1; }
@@ -114,22 +114,22 @@ if torch.cuda.is_available():
 PYCHECK
 
   echo
-  echo "fetching the three checkpoints into $LAYA_MODELS_DIR (~2.4 GB)"
+  echo "fetching the three checkpoints into $ARBITER_MODELS_DIR (~2.4 GB)"
   local hf="$VENV/bin/hf"
   [ -x "$hf" ] || hf="$(command -v hf)"
   # One --exclude per pattern: the flag takes a single value, and extra patterns after it are
   # read as the positional FILENAMES list, which downloads exactly the files you meant to skip.
   "$hf" download convaiinnovations/laya \
-      --local-dir "$LAYA_MODELS_DIR" \
+      --local-dir "$ARBITER_MODELS_DIR" \
       --exclude "assets/*" --exclude "eval/*" --exclude "*.png" --exclude "*.jpg"
-  du -sh "$LAYA_MODELS_DIR" 2>/dev/null || true
+  du -sh "$ARBITER_MODELS_DIR" 2>/dev/null || true
   banner "setup done"
 }
 
 cmd_serve() {
   need_venv
   native_jit_guard
-  banner "serve on $HOST:$PORT (mode=$LAYA_MODE dtype=$LAYA_DTYPE device=$DEVICE models=$LAYA_MODELS)"
+  banner "serve on $HOST:$PORT (mode=$ARBITER_MODE dtype=$ARBITER_DTYPE device=$DEVICE models=$ARBITER_MODELS)"
   mkdir -p "$LOGS"
   if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "already running as pid $(cat "$PIDFILE")" >&2
@@ -190,7 +190,7 @@ cmd_smoke() {
 cmd_examples() {
   need_venv
   banner "examples against $BASE"
-  LAYA_URL="$BASE" exec "$PY" "$HERE/examples/support_triage.py" "$@"
+  ARBITER_URL="$BASE" exec "$PY" "$HERE/examples/support_triage.py" "$@"
 }
 
 cmd_bench() {

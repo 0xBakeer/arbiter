@@ -23,8 +23,8 @@ reversal is visible as a reversal.
 
 | Setting | Shipped | The alternative | Why not the alternative |
 |---|---|---|---|
-| `LAYA_DTYPE` | `autocast` | `bf16` parameters, 15–35% faster | moves reported probabilities by up to 2.1e-2 and flips one argmax out of 22 |
-| `LAYA_MODE` | `eager` | `graphs`, 20% faster at one question | 1.5× slower at 50 questions and 14% lower throughput at concurrency 8 |
+| `ARBITER_DTYPE` | `autocast` | `bf16` parameters, 15–35% faster | moves reported probabilities by up to 2.1e-2 and flips one argmax out of 22 |
+| `ARBITER_MODE` | `eager` | `graphs`, 20% faster at one question | 1.5× slower at 50 questions and 14% lower throughput at concurrency 8 |
 
 ### Added
 
@@ -36,18 +36,18 @@ reversal is visible as a reversal.
   `typed-decisions` is never selected automatically. 5,055 MiB of GPU memory for all three.
 - **Cross-request micro-batching.** A worker thread per checkpoint collects question rows from
   concurrent requests into one forward. 135 questions/s at one caller becomes 287 at eight.
-- **CUDA-graph mode** (`LAYA_MODE=graphs`), with bucketed shapes, lazy capture, a shared memory
+- **CUDA-graph mode** (`ARBITER_MODE=graphs`), with bucketed shapes, lazy capture, a shared memory
   pool, and an eager fallback for anything outside a bucket.
 - **`tools/equivalence.py`**, which is the reason the defaults are what they are: 22 mixed
   questions through the SDK reference and every dtype/mode combination, reporting max |Δp| and
   argmax agreement. `autocast/eager` comes out identical to the reference at four decimals.
 - **Nine runnable examples** in `examples/` — support triage, inbox triage, a tool-call guard,
   a PR risk gate, alert triage, model routing, RAG relevance, moderation and invoice fields —
-  over `examples/laya_client.py`, a single dependency-free client whose API mirrors the hosted
+  over `examples/arbiter_client.py`, a single dependency-free client whose API mirrors the hosted
   SDK. Every question set is data, every threshold is in the caller, and the captured output of
   each one is in [docs/use-cases.md](docs/use-cases.md).
-- **Integrations for coding agents.** `integrations/mcp/laya_mcp.py` exposes `laya_check`,
-  `laya_classify`, `laya_score`, `laya_gate` and `laya_decide` over MCP; the Claude Code plugin
+- **Integrations for coding agents.** `integrations/mcp/arbiter_mcp.py` exposes `arbiter_check`,
+  `arbiter_classify`, `arbiter_score`, `arbiter_gate` and `arbiter_decide` over MCP; the Claude Code plugin
   adds a skill and a `PreToolUse` hook that judges every `Bash` command in tens of milliseconds
   and fails open when the server is not there. Ready-made configuration for Codex, OpenCode, omp
   and any generic `.mcp.json` client, plus a GitHub Actions job that gates pull requests.

@@ -47,34 +47,34 @@ class Registry:
     def render(self, queue_depth: int) -> str:
         with self._lock:
             out = [
-                "# HELP laya_requests_total System One requests, by routed checkpoint and status.",
-                "# TYPE laya_requests_total counter",
+                "# HELP arbiter_requests_total System One requests, by routed checkpoint and status.",
+                "# TYPE arbiter_requests_total counter",
             ]
             for (model, status), n in sorted(self.requests.items()):
-                out.append('laya_requests_total{model="%s",status="%d"} %d' % (_escape(model), status, n))
+                out.append('arbiter_requests_total{model="%s",status="%d"} %d' % (_escape(model), status, n))
 
-            out += ["# HELP laya_questions_total Questions answered, by checkpoint.",
-                    "# TYPE laya_questions_total counter"]
+            out += ["# HELP arbiter_questions_total Questions answered, by checkpoint.",
+                    "# TYPE arbiter_questions_total counter"]
             for model, n in sorted(self.questions.items()):
-                out.append('laya_questions_total{model="%s"} %d' % (_escape(model), n))
+                out.append('arbiter_questions_total{model="%s"} %d' % (_escape(model), n))
 
-            out += ["# HELP laya_request_latency_seconds End-to-end request latency.",
-                    "# TYPE laya_request_latency_seconds histogram"]
+            out += ["# HELP arbiter_request_latency_seconds End-to-end request latency.",
+                    "# TYPE arbiter_request_latency_seconds histogram"]
             for edge, n in zip(LATENCY_BUCKETS, self.latency_counts):
-                out.append('laya_request_latency_seconds_bucket{le="%s"} %d' % (edge, n))
-            out.append('laya_request_latency_seconds_bucket{le="+Inf"} %d' % self.latency_total)
-            out.append("laya_request_latency_seconds_sum %.6f" % self.latency_sum)
-            out.append("laya_request_latency_seconds_count %d" % self.latency_total)
+                out.append('arbiter_request_latency_seconds_bucket{le="%s"} %d' % (edge, n))
+            out.append('arbiter_request_latency_seconds_bucket{le="+Inf"} %d' % self.latency_total)
+            out.append("arbiter_request_latency_seconds_sum %.6f" % self.latency_sum)
+            out.append("arbiter_request_latency_seconds_count %d" % self.latency_total)
 
-            out += ["# HELP laya_batch_rows Question rows per forward pass.",
-                    "# TYPE laya_batch_rows histogram"]
+            out += ["# HELP arbiter_batch_rows Question rows per forward pass.",
+                    "# TYPE arbiter_batch_rows histogram"]
             for edge, n in zip(BATCH_BUCKETS, self.batch_counts):
-                out.append('laya_batch_rows_bucket{le="%d"} %d' % (edge, n))
-            out.append('laya_batch_rows_bucket{le="+Inf"} %d' % self.batch_total)
-            out.append("laya_batch_rows_sum %d" % self.batch_sum)
-            out.append("laya_batch_rows_count %d" % self.batch_total)
+                out.append('arbiter_batch_rows_bucket{le="%d"} %d' % (edge, n))
+            out.append('arbiter_batch_rows_bucket{le="+Inf"} %d' % self.batch_total)
+            out.append("arbiter_batch_rows_sum %d" % self.batch_sum)
+            out.append("arbiter_batch_rows_count %d" % self.batch_total)
 
-            out += ["# HELP laya_queue_depth Question rows waiting for or inside a forward pass.",
-                    "# TYPE laya_queue_depth gauge",
-                    "laya_queue_depth %d" % queue_depth]
+            out += ["# HELP arbiter_queue_depth Question rows waiting for or inside a forward pass.",
+                    "# TYPE arbiter_queue_depth gauge",
+                    "arbiter_queue_depth %d" % queue_depth]
             return "\n".join(out) + "\n"

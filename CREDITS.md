@@ -50,7 +50,7 @@ the thresholds in them are ours; the way of thinking about the problem is not.
 **[FastAPI](https://fastapi.tiangolo.com)** and **[uvicorn](https://www.uvicorn.org)** — the
 HTTP surface.
 **[Model Context Protocol](https://modelcontextprotocol.io)** — the `mcp` Python SDK, which
-`integrations/mcp/laya_mcp.py` is built on and which its tests drive over stdio.
+`integrations/mcp/arbiter_mcp.py` is built on and which its tests drive over stdio.
 
 ---
 

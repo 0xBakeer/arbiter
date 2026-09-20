@@ -30,5 +30,5 @@ README needs a fixed width or centring:
 ```
 
 Inline in a page you control, paste the `<svg>` element directly; its styles are scoped to the
-`.laya-diagram` class and override nothing else. To tint the accents to a site palette, set
-`--accent` and `--accent2` on the `.laya-diagram` element.
+`.arbiter-diagram` class and override nothing else. To tint the accents to a site palette, set
+`--accent` and `--accent2` on the `.arbiter-diagram` element.

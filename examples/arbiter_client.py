@@ -5,10 +5,10 @@ that exists everywhere. The names mirror TypeSafe's SDK (`Choice`, `Score`, `Nou
 with one `system_one` call taking `state` and a dict of questions), so code written against the
 hosted Jev API ports by changing the import and the base URL.
 
-    from laya_client import LayaClient, Choice, Noul, Score
+    from arbiter_client import ArbiterClient, Choice, Noul, Score
 
-    laya = LayaClient()                       # LAYA_URL, default http://localhost:8010
-    r = laya.system_one(ticket, {
+    arbiter = ArbiterClient()                       # ARBITER_URL, default http://localhost:8010
+    r = arbiter.system_one(ticket, {
         "department": Choice("Which team owns this?", {"billing": "payments", "tech": "bugs"}),
         "urgency":    Score("How urgent is it?", ["no rush", "this week", "today", "now"]),
         "refund":     Noul("The customer is asking for a refund."),
@@ -29,8 +29,8 @@ from typing import Any, Dict, List, Mapping, Optional, Union
 DEFAULT_URL = "http://localhost:8010"
 
 __all__ = [
-    "Choice", "Score", "Noul", "LayaClient", "Response",
-    "LayaError", "AuthError", "RequestError", "OverloadedError", "UnreachableError",
+    "Choice", "Score", "Noul", "ArbiterClient", "Response",
+    "ArbiterError", "AuthError", "RequestError", "OverloadedError", "UnreachableError",
 ]
 
 
@@ -103,23 +103,23 @@ def encode_questions(questions: Mapping[str, Union[Question, Mapping[str, Any]]]
 
 # --------------------------------------------------------------------------- errors
 
-class LayaError(Exception):
+class ArbiterError(Exception):
     """Anything that stopped a request from producing answers."""
 
 
-class AuthError(LayaError):
+class AuthError(ArbiterError):
     """401: the server wants an API key and did not get a valid one."""
 
 
-class RequestError(LayaError):
+class RequestError(ArbiterError):
     """422: the question set or the state does not satisfy the contract."""
 
 
-class OverloadedError(LayaError):
+class OverloadedError(ArbiterError):
     """529: too many question rows in flight. Back off and retry."""
 
 
-class UnreachableError(LayaError):
+class UnreachableError(ArbiterError):
     """The server did not answer at all -- not running, wrong port, tunnel down."""
 
 
@@ -130,7 +130,7 @@ def _raise_for(status: int, body: str, url: str) -> None:
         message = body.strip()[:400] or "(empty body)"
     if status == 401:
         raise AuthError(
-            "%s rejected the key: %s. Set LAYA_API_KEY to the key the server was started with."
+            "%s rejected the key: %s. Set ARBITER_API_KEY to the key the server was started with."
             % (url, message))
     if status == 422:
         raise RequestError("%s rejected the request: %s" % (url, message))
@@ -140,7 +140,7 @@ def _raise_for(status: int, body: str, url: str) -> None:
         raise UnreachableError(
             "%s is still loading its checkpoints: %s. Poll /readyz until it reports ready."
             % (url, message))
-    raise LayaError("%s returned HTTP %d: %s" % (url, status, message))
+    raise ArbiterError("%s returned HTTP %d: %s" % (url, status, message))
 
 
 # --------------------------------------------------------------------------- response
@@ -205,13 +205,13 @@ class Response(dict):
 
 # --------------------------------------------------------------------------- client
 
-class LayaClient:
+class ArbiterClient:
     """One HTTP call per `system_one`, no session state, safe to share between threads."""
 
     def __init__(self, base_url: Optional[str] = None, api_key: Optional[str] = None,
                  timeout: float = 30.0, retries: int = 2):
-        self.base_url = (base_url or os.environ.get("LAYA_URL") or DEFAULT_URL).rstrip("/")
-        self.api_key = api_key if api_key is not None else os.environ.get("LAYA_API_KEY")
+        self.base_url = (base_url or os.environ.get("ARBITER_URL") or DEFAULT_URL).rstrip("/")
+        self.api_key = api_key if api_key is not None else os.environ.get("ARBITER_API_KEY")
         self.timeout = timeout
         self.retries = max(0, int(retries))
 
@@ -240,7 +240,7 @@ class LayaClient:
                 _raise_for(exc.code, payload, url)
             except urllib.error.URLError as exc:
                 raise UnreachableError(
-                    "cannot reach %s (%s). Start the server with ./run.sh, or point LAYA_URL at "
+                    "cannot reach %s (%s). Start the server with ./run.sh, or point ARBITER_URL at "
                     "one that is running." % (url, exc.reason)) from None
             except OSError as exc:
                 # A reset or a dropped connection mid-response: the server went away while it
@@ -268,5 +268,5 @@ class LayaClient:
     def ready(self) -> bool:
         try:
             return self._request("GET", "/readyz").get("status") == "ready"
-        except LayaError:
+        except ArbiterError:
             return False

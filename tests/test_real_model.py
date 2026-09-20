@@ -1,16 +1,16 @@
 """Opt-in: the same contract against the real checkpoints.
 
-Skipped unless LAYA_MODELS_DIR points at a downloaded `convaiinnovations/laya` tree, because it
+Skipped unless ARBITER_MODELS_DIR points at a downloaded `convaiinnovations/laya` tree, because it
 needs 2.4 GB of weights. Runs on CPU by default; set DEVICE=cuda to exercise the GPU path.
 """
 import os
 
 import pytest
 
-MODELS_DIR = os.environ.get("LAYA_MODELS_DIR")
+MODELS_DIR = os.environ.get("ARBITER_MODELS_DIR")
 pytestmark = pytest.mark.skipif(
     not (MODELS_DIR and os.path.isdir(MODELS_DIR)),
-    reason="set LAYA_MODELS_DIR to a downloaded convaiinnovations/laya tree to run this")
+    reason="set ARBITER_MODELS_DIR to a downloaded convaiinnovations/laya tree to run this")
 
 QUESTIONS = {
     "angry": {"type": "noul", "instructions": "The customer is angry.", "criteria": None},

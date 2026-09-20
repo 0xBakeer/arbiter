@@ -1,27 +1,27 @@
-<svg xmlns="http://www.w3.org/2000/svg" class="laya-diagram" viewBox="0 0 900 300" width="900" height="300" role="img" aria-labelledby="t1 d1">
+<svg xmlns="http://www.w3.org/2000/svg" class="arbiter-diagram" viewBox="0 0 900 300" width="900" height="300" role="img" aria-labelledby="t1 d1">
   <title id="t1">One call, many typed answers</title>
   <desc id="d1">A state and a set of typed questions go into the Laya encoder, which runs one forward pass and returns a typed answer with probabilities for every question.</desc>
   <style>
-    .laya-diagram { --ink: #121729; --muted: #5F6883; --line: #C6CCDB; --track: #E9ECF3; --accent: #2A56E8; --accent2: #DE5F0A;
+    .arbiter-diagram { --ink: #121729; --muted: #5F6883; --line: #C6CCDB; --track: #E9ECF3; --accent: #2A56E8; --accent2: #DE5F0A;
       color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; }
     @media (prefers-color-scheme: dark) {
-      .laya-diagram { --ink: #E9EDF7; --muted: #8B95B3; --line: #2B3758; --track: #1B2440; --accent: #5583FF; --accent2: #FF8C33; }
+      .arbiter-diagram { --ink: #E9EDF7; --muted: #8B95B3; --line: #2B3758; --track: #1B2440; --accent: #5583FF; --accent2: #FF8C33; }
     }
-    .laya-diagram .box { fill: none; stroke: var(--line); stroke-width: 1; rx: 6; }
-    .laya-diagram .t { fill: currentColor; }
-    .laya-diagram .m { fill: var(--muted); }
-    .laya-diagram .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-    .laya-diagram .small { font-size: 11px; }
-    .laya-diagram .head { font-size: 14px; font-weight: 600; }
-    .laya-diagram .arrow { stroke: var(--muted); stroke-width: 1.2; fill: none; }
-    .laya-diagram .ah { fill: var(--muted); }
-    .laya-diagram .track { fill: var(--track); }
-    .laya-diagram .fill { fill: var(--line); }
-    .laya-diagram .win { fill: var(--accent); }
-    .laya-diagram .mark { stroke: var(--accent2); stroke-width: 2; }
-    .laya-diagram .accent2 { fill: var(--accent2); }
-    .laya-diagram .layer { fill: none; stroke: var(--line); stroke-width: 1; }
-    .laya-diagram .needle { fill: currentColor; }
+    .arbiter-diagram .box { fill: none; stroke: var(--line); stroke-width: 1; rx: 6; }
+    .arbiter-diagram .t { fill: currentColor; }
+    .arbiter-diagram .m { fill: var(--muted); }
+    .arbiter-diagram .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .arbiter-diagram .small { font-size: 11px; }
+    .arbiter-diagram .head { font-size: 14px; font-weight: 600; }
+    .arbiter-diagram .arrow { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+    .arbiter-diagram .ah { fill: var(--muted); }
+    .arbiter-diagram .track { fill: var(--track); }
+    .arbiter-diagram .fill { fill: var(--line); }
+    .arbiter-diagram .win { fill: var(--accent); }
+    .arbiter-diagram .mark { stroke: var(--accent2); stroke-width: 2; }
+    .arbiter-diagram .accent2 { fill: var(--accent2); }
+    .arbiter-diagram .layer { fill: none; stroke: var(--line); stroke-width: 1; }
+    .arbiter-diagram .needle { fill: currentColor; }
   </style>
 
   <!-- request -->

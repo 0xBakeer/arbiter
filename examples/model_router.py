@@ -16,7 +16,7 @@ most money, because most requests in the middle band really are answerable by th
 import sys
 
 import _cli
-from laya_client import LayaClient, Noul, Score
+from arbiter_client import ArbiterClient, Noul, Score
 
 QUESTIONS = {
     "complexity": Score(
@@ -67,7 +67,7 @@ def decide(r):
 def main() -> int:
     args = _cli.parser(__doc__).parse_args()
     state = _cli.load_state(args, SAMPLE)
-    response = LayaClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
+    response = ArbiterClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
     if args.json:
         return _cli.dump(response)
     action, reason = decide(response)

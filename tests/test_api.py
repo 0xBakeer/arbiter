@@ -288,7 +288,7 @@ def test_root_serves_the_playground_page():
     r = c.get("/")
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/html")
-    assert "laya-spark" in r.text
+    assert "arbiter" in r.text
 
 
 def test_the_playground_is_not_in_the_openapi_schema():
@@ -329,9 +329,9 @@ def test_metrics_counts_requests_questions_and_batches():
     post(c, {"state": STATE, "questions": {"a": NOUL, "b": NOUL}})
     post(c, {"state": STATE, "questions": {"a": {"type": "ranking", "instructions": "x"}}})
     text = c.get("/metrics").text
-    assert 'laya_requests_total{model="english",status="200"} 1' in text
-    assert 'laya_requests_total{model="none",status="422"} 1' in text
-    assert 'laya_questions_total{model="english"} 2' in text
-    assert "laya_request_latency_seconds_count 2" in text
-    assert "laya_batch_rows_count 1" in text
-    assert "laya_queue_depth 0" in text
+    assert 'arbiter_requests_total{model="english",status="200"} 1' in text
+    assert 'arbiter_requests_total{model="none",status="422"} 1' in text
+    assert 'arbiter_questions_total{model="english"} 2' in text
+    assert "arbiter_request_latency_seconds_count 2" in text
+    assert "arbiter_batch_rows_count 1" in text
+    assert "arbiter_queue_depth 0" in text

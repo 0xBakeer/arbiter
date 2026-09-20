@@ -20,7 +20,7 @@ import json
 import sys
 
 import _cli
-from laya_client import LayaClient, Noul
+from arbiter_client import ArbiterClient, Noul
 
 CHUNK = 6                    # passages per request; keeps each state inside the read window
 KEEP = 0.60                  # above this a passage goes to the generator
@@ -95,7 +95,7 @@ def main() -> int:
     query = args.query or state["query"]
     passages = state["passages"]
 
-    client = LayaClient(base_url=args.url)
+    client = ArbiterClient(base_url=args.url)
     scores, last, stage = rank(client, query, passages, model=args.model)
     if args.json:
         print(json.dumps({"query": query, "scores": {str(k): v for k, v in scores.items()},

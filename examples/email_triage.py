@@ -17,7 +17,7 @@ the caller saying anything about language -- watch the badge in the header.
 import sys
 
 import _cli
-from laya_client import Choice, LayaClient, Noul, Score
+from arbiter_client import Choice, ArbiterClient, Noul, Score
 
 QUESTIONS = {
     "category": Choice(
@@ -98,7 +98,7 @@ def main() -> int:
                    help="which built-in message to triage (ignored with --state or a pipe)")
     args = p.parse_args()
     state = _cli.load_state(args, SAMPLES[args.sample])
-    response = LayaClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
+    response = ArbiterClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
     if args.json:
         return _cli.dump(response)
     action, reason = decide(response)

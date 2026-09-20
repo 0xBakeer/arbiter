@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from . import metrics
 from .errors import OptionBudgetError, OverloadedError
 
-VERSION = (os.environ.get("LAYA_SPARK_VERSION") or "").strip() or "0.0.0-dev"
+VERSION = (os.environ.get("ARBITER_VERSION") or "").strip() or "0.0.0-dev"
 
 # What a client may put in `model`. "jev-latest" is what a migrating Jev client already sends,
 # and it means the same thing here as "let the router choose".
@@ -134,10 +134,10 @@ def create_app(engine=None) -> FastAPI:
         if app.state.engine is not None:
             app.state.engine.close()
 
-    app = FastAPI(title="laya-spark", version=VERSION, docs_url="/docs", lifespan=lifespan)
+    app = FastAPI(title="arbiter", version=VERSION, docs_url="/docs", lifespan=lifespan)
     app.state.engine = engine
     app.state.ready = engine is not None
-    app.state.api_key = os.environ.get("LAYA_API_KEY") or None
+    app.state.api_key = os.environ.get("ARBITER_API_KEY") or None
     app.state.metrics = metrics.Registry()
 
     # -- helpers -----------------------------------------------------------------
@@ -177,7 +177,7 @@ def create_app(engine=None) -> FastAPI:
                  "aliases": sorted(a for a, t in EXPLICIT_NAMES.items() if t == n)}
                 for n in loaded]
         data.append({"id": "jev-latest", "object": "model", "created": created,
-                     "owned_by": "laya-spark",
+                     "owned_by": "arbiter",
                      "aliases": sorted(AUTO_NAMES - {""}),
                      "description": "automatic routing across the loaded checkpoints"})
         return {"object": "list", "data": data}

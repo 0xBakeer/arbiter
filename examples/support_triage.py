@@ -12,7 +12,7 @@ to a human rather than being guessed at.
 import sys
 
 import _cli
-from laya_client import Choice, LayaClient, Noul, Score
+from arbiter_client import Choice, ArbiterClient, Noul, Score
 
 # The questions are data, not code: the same dict is what goes in docs/use-cases.md, what a QA
 # harness replays, and what you edit when the routing is wrong.
@@ -86,7 +86,7 @@ def decide(r):
 def main() -> int:
     args = _cli.parser(__doc__).parse_args()
     state = _cli.load_state(args, SAMPLE)
-    response = LayaClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
+    response = ArbiterClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
     if args.json:
         return _cli.dump(response)
     action, reason = decide(response)

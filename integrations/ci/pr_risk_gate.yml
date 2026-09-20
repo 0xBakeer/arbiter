@@ -1,12 +1,12 @@
-# Gate pull requests on the diff itself, using a self-hosted Laya server.
+# Gate pull requests on the diff itself, using a self-hosted arbiter server.
 #
 # Copy to .github/workflows/pr-risk-gate.yml. It needs one of:
 #
-#   * a self-hosted runner that can reach the Laya server (the default below), or
-#   * `runs-on: ubuntu-latest` plus a LAYA_URL the runner can actually reach.
+#   * a self-hosted runner that can reach the arbiter server (the default below), or
+#   * `runs-on: ubuntu-latest` plus a ARBITER_URL the runner can actually reach.
 #
-# Configure with a repository variable LAYA_URL (for example http://laya.internal:8010) and,
-# if the server requires one, a repository secret LAYA_API_KEY.
+# Configure with a repository variable ARBITER_URL (for example http://arbiter.internal:8010) and,
+# if the server requires one, a repository secret ARBITER_API_KEY.
 #
 # Exit codes from examples/pr_risk_gate.py are the whole contract: 0 allow, 1 review, 2 block,
 # 3 the server could not be reached.
@@ -21,7 +21,7 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: laya-risk-${{ github.event.pull_request.number }}
+  group: arbiter-risk-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -39,8 +39,8 @@ jobs:
       - name: Judge the diff
         id: gate
         env:
-          LAYA_URL: ${{ vars.LAYA_URL || 'http://localhost:8010' }}
-          LAYA_API_KEY: ${{ secrets.LAYA_API_KEY }}
+          ARBITER_URL: ${{ vars.ARBITER_URL || 'http://localhost:8010' }}
+          ARBITER_API_KEY: ${{ secrets.ARBITER_API_KEY }}
           TITLE: ${{ github.event.pull_request.title }}
           BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           {
-            echo "### Laya risk gate"
+            echo "### Arbiter risk gate"
             echo
             echo '```'
             cat report.txt
@@ -72,17 +72,17 @@ jobs:
       - name: Fail on block
         if: steps.gate.outputs.verdict == '2'
         run: |
-          echo "::error::Laya blocked this change. See the risk-gate comment on the pull request."
+          echo "::error::Arbiter blocked this change. See the risk-gate comment on the pull request."
           exit 1
 
       - name: Warn on review
         if: steps.gate.outputs.verdict == '1'
-        run: echo "::warning::Laya wants a human review of this change."
+        run: echo "::warning::Arbiter wants a human review of this change."
 
       - name: The decision server was unreachable
         if: steps.gate.outputs.verdict == '3'
         run: |
-          echo "::warning::Could not reach the Laya server at ${{ vars.LAYA_URL }}; the gate did not run."
+          echo "::warning::Could not reach the arbiter server at ${{ vars.ARBITER_URL }}; the gate did not run."
           # Fail open: a decision service that is down must not block every merge. Set the
-          # repository variable LAYA_FAIL_CLOSED to 1 to turn that around.
-          if [ "${{ vars.LAYA_FAIL_CLOSED }}" = "1" ]; then exit 1; fi
+          # repository variable ARBITER_FAIL_CLOSED to 1 to turn that around.
+          if [ "${{ vars.ARBITER_FAIL_CLOSED }}" = "1" ]; then exit 1; fi

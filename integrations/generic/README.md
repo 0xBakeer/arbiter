@@ -9,15 +9,15 @@ through three environment variables.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `LAYA_URL` | `http://localhost:8010` | where the Laya server is |
-| `LAYA_API_KEY` | unset | sent as `Authorization: Bearer …` when the server requires a key |
-| `LAYA_MODEL` | `auto` | pin a checkpoint: `laya-english`, `laya-multilingual`, `laya-typed-decisions` |
-| `LAYA_TIMEOUT` | `30` | seconds to wait for a response |
+| `ARBITER_URL` | `http://localhost:8010` | where the arbiter server is |
+| `ARBITER_API_KEY` | unset | sent as `Authorization: Bearer …` when the server requires a key |
+| `ARBITER_MODEL` | `auto` | pin a checkpoint: `laya-english`, `laya-multilingual`, `laya-typed-decisions` |
+| `ARBITER_TIMEOUT` | `30` | seconds to wait for a response |
 
 To check the server outside any client:
 
 ```bash
-LAYA_URL=http://localhost:8010 python3 integrations/mcp/laya_mcp.py
+ARBITER_URL=http://localhost:8010 python3 integrations/mcp/arbiter_mcp.py
 ```
 
 It will sit there waiting for JSON-RPC on stdin, which means it started cleanly.

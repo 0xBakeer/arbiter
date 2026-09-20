@@ -15,7 +15,7 @@ PreToolUse hook.
 import sys
 
 import _cli
-from laya_client import LayaClient, Noul, Score
+from arbiter_client import ArbiterClient, Noul, Score
 
 QUESTIONS = {
     "is_destructive": Noul(
@@ -93,7 +93,7 @@ def main() -> int:
     args = p.parse_args()
     state = ({"command": args.command, "cwd": args.cwd} if args.command
              else _cli.load_state(args, SAMPLE))
-    response = LayaClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
+    response = ArbiterClient(base_url=args.url).system_one(state, QUESTIONS, model=args.model)
     if args.json:
         return _cli.dump(response)
     action, reason = decide(response)
