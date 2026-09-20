@@ -156,7 +156,8 @@ def create_app(engine=None) -> FastAPI:
         eng = app.state.engine
         if not app.state.ready or eng is None:
             return JSONResponse(status_code=503, content={"status": "loading"})
-        return {"status": "ready", "models": eng.loaded, "mode": eng.mode, "version": VERSION}
+        return {"status": "ready", "models": eng.loaded, "mode": eng.mode,
+                "dtype": eng.dtype_mode, "version": VERSION}
 
     @app.get("/v1/models")
     async def models():

@@ -30,6 +30,7 @@ def _answer(qdef: Dict[str, Any]) -> Dict[str, Any]:
 
 class StubEngine:
     mode = "eager"
+    dtype_mode = "autocast"
 
     def __init__(self, loaded: List[str] = None, fail: str = None):
         self._loaded = loaded or ["english", "multilingual", "typed-decisions"]

@@ -1,0 +1,38 @@
+# systemd *user* unit for laya-spark.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/laya.service ~/.config/systemd/user/
+#   $EDITOR ~/.config/systemd/user/laya.service     # set WorkingDirectory
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now laya
+#
+# A user unit stops when your last session ends unless lingering is enabled for the account:
+#
+#   loginctl enable-linger $USER
+#
+# That needs privileges you may not have on a shared box. Without it, start the server the way
+# ./run.sh serve does -- detached under setsid, with a pid file -- and leave this unit unused.
+
+[Unit]
+Description=laya-spark, a Jev-compatible System One server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/recipes/laya-spark
+ExecStart=%h/recipes/laya-spark/run.sh serve-foreground
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=300
+
+Environment=PORT=8010
+Environment=HOST=0.0.0.0
+Environment=DEVICE=cuda
+Environment=LAYA_MODE=eager
+Environment=LAYA_DTYPE=autocast
+Environment=LAYA_MODELS=english,multilingual,typed-decisions
+# Environment=LAYA_API_KEY=
+
+[Install]
+WantedBy=default.target

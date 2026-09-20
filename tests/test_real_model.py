@@ -55,11 +55,25 @@ def test_batching_does_not_change_an_answer(checkpoint):
     assert abs(one["noul"] - together["noul"]) < 5e-3
 
 
+def choice_with(n):
+    return {"dept": {"type": "choice", "instructions": "Route it.",
+                     "criteria": {"option number %d" % i: "a fairly long description of it"
+                                  for i in range(n)}}}
+
+
 def test_too_many_options_is_refused_rather_than_truncated(checkpoint):
+    """Jev allows 255 options; this checkpoint's 512-token context cannot hold their markers.
+
+    `build_sequence` squeezes each option to 4 tokens and then drops the markers that fall past
+    `max_len`, which would silently answer a different question. The refusal is the point.
+    """
     from server.errors import OptionBudgetError
 
-    huge = {"dept": {"type": "choice", "instructions": "Route it.",
-                     "criteria": {"option number %d" % i: "a fairly long description of it"
-                                  for i in range(120)}}}
-    with pytest.raises(OptionBudgetError):
-        checkpoint.build_rows(STATE, huge)
+    with pytest.raises(OptionBudgetError, match="head_max_len"):
+        checkpoint.build_rows(STATE, choice_with(255))
+
+
+def test_the_largest_option_set_that_still_fits(checkpoint):
+    rows = checkpoint.build_rows(STATE, choice_with(124))
+    assert len(rows[0]["markers"]) == 124
+    assert len(rows[0]["ids"]) <= checkpoint.max_len

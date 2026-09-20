@@ -162,10 +162,12 @@ def main():
 
     gpu = gpu_name()
     payload = {"date": str(date.today()), "gpu": gpu, "mode": info.get("mode", args.label),
+               "dtype": info.get("dtype", "autocast"),
                "models": info.get("models"), "version": info.get("version"),
                "latency": rows, "throughput": conc}
 
-    md = ["", "## %s -- %s, `LAYA_MODE=%s`" % (payload["date"], gpu, payload["mode"]), "",
+    md = ["", "## %s -- %s, `LAYA_MODE=%s`, `LAYA_DTYPE=%s`"
+          % (payload["date"], gpu, payload["mode"], payload["dtype"]), "",
           "Checkpoints loaded: %s. Server version %s." % (", ".join(payload["models"] or []), payload["version"]),
           "", "### Latency, one caller, auto-routed English state", "",
           "| questions in the call | p50 | p95 | per question |", "|---:|---:|---:|---:|"]

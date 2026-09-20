@@ -21,6 +21,7 @@ HOST="${HOST:-0.0.0.0}"
 DEVICE="${DEVICE:-cuda}"
 LAYA_MODELS="${LAYA_MODELS:-english,multilingual,typed-decisions}"
 LAYA_MODE="${LAYA_MODE:-eager}"
+LAYA_DTYPE="${LAYA_DTYPE:-autocast}"
 LAYA_API_KEY="${LAYA_API_KEY:-}"
 LAYA_BATCH_WAIT_MS="${LAYA_BATCH_WAIT_MS:-2}"
 LAYA_MAX_BATCH="${LAYA_MAX_BATCH:-64}"
@@ -37,7 +38,7 @@ LOGS="$HERE/logs"
 PIDFILE="$LOGS/laya.pid"
 BASE="http://127.0.0.1:$PORT"
 
-export PORT HOST DEVICE LAYA_MODELS LAYA_MODE LAYA_API_KEY LAYA_BATCH_WAIT_MS LAYA_MAX_BATCH \
+export PORT HOST DEVICE LAYA_MODELS LAYA_MODE LAYA_DTYPE LAYA_API_KEY LAYA_BATCH_WAIT_MS LAYA_MAX_BATCH \
        LAYA_MAX_QUEUE LAYA_GRAPH_MAX_MARKERS LAYA_MODELS_DIR
 export LAYA_SPARK_VERSION="$VERSION"
 
@@ -47,17 +48,52 @@ need_venv() {
   [ -x "$PY" ] || { echo "no .venv yet; run ./run.sh setup" >&2; exit 1; }
 }
 
+# torch routes a handful of eager ops (ModernBERT's RoPE among them) through Triton, and Triton
+# JIT-compiles a small C extension the first time one runs. That needs the interpreter's
+# development headers on disk. A distribution python without python3-dev does not have them, and
+# the failure lands on the first forward pass as "Python.h: No such file or directory".
+HEADER_PROBE='import os,sys,sysconfig; p=sysconfig.get_paths(scheme=sysconfig.get_default_scheme())["include"]; sys.exit(0 if os.path.exists(os.path.join(p,"Python.h")) else 1)'
+
+# Candidates in preference order. A uv-managed CPython ships its own headers, which a
+# distribution python3.12 without python3-dev does not, so it is tried first.
+uv_pythons() {
+  ls -d "$HOME"/.local/share/uv/python/cpython-3.1[2-9]*/bin/python3.1[2-9] 2>/dev/null | sort -r
+}
+
+pick_python() {
+  local fallback=""
+  for c in ${PYTHON:-} $(uv_pythons) python3.12 python3; do
+    command -v "$c" >/dev/null 2>&1 || continue
+    [ -n "$fallback" ] || fallback="$c"
+    if "$c" -c "$HEADER_PROBE" 2>/dev/null; then echo "$c"; return 0; fi
+  done
+  [ -n "$fallback" ] && { echo "$fallback"; return 0; }
+  echo "no python3 found" >&2
+  return 1
+}
+
+native_jit_guard() {
+  # If the headers are missing anyway, take torch's plain eager kernels instead of dying.
+  if [ -z "${TORCH_DISABLE_NATIVE_JIT:-}" ] && ! "$PY" -c "$HEADER_PROBE" 2>/dev/null; then
+    export TORCH_DISABLE_NATIVE_JIT=1
+    echo "note: no CPython headers for this interpreter, so torch's Triton eager kernels cannot"
+    echo "      build here; running with TORCH_DISABLE_NATIVE_JIT=1"
+  fi
+}
+
 cmd_setup() {
   banner "setup"
   mkdir -p "$LOGS" "$MODELS_DIR"
 
   if [ ! -x "$PY" ]; then
     local base
-    base="$(command -v python3.12 || command -v python3)"
-    echo "creating .venv with $base ($("$base" --version 2>&1))"
+    base="$(pick_python)"
+    echo "creating .venv with $(command -v "$base") ($("$base" --version 2>&1))"
+    "$base" -c "$HEADER_PROBE" 2>/dev/null || echo "  (this interpreter has no development headers; see the note at serve time)"
     "$base" -m venv "$VENV"
   fi
 
+  native_jit_guard
   "$PY" -m pip install --upgrade pip wheel >/dev/null
   # torch first and from the CUDA index, so the rest resolve against the build that is staying.
   # torchvision and torchaudio are not installed: nothing here uses them.
@@ -78,16 +114,19 @@ PYCHECK
   echo "fetching the three checkpoints into $LAYA_MODELS_DIR (~2.4 GB)"
   local hf="$VENV/bin/hf"
   [ -x "$hf" ] || hf="$(command -v hf)"
+  # One --exclude per pattern: the flag takes a single value, and extra patterns after it are
+  # read as the positional FILENAMES list, which downloads exactly the files you meant to skip.
   "$hf" download convaiinnovations/laya \
       --local-dir "$LAYA_MODELS_DIR" \
-      --exclude "assets/*" "eval/*" "*.png" "*.jpg"
+      --exclude "assets/*" --exclude "eval/*" --exclude "*.png" --exclude "*.jpg"
   du -sh "$LAYA_MODELS_DIR" 2>/dev/null || true
   banner "setup done"
 }
 
 cmd_serve() {
   need_venv
-  banner "serve on $HOST:$PORT (mode=$LAYA_MODE device=$DEVICE models=$LAYA_MODELS)"
+  native_jit_guard
+  banner "serve on $HOST:$PORT (mode=$LAYA_MODE dtype=$LAYA_DTYPE device=$DEVICE models=$LAYA_MODELS)"
   mkdir -p "$LOGS"
   if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "already running as pid $(cat "$PIDFILE")" >&2
@@ -112,6 +151,7 @@ cmd_serve() {
 
 cmd_serve_foreground() {
   need_venv
+  native_jit_guard
   banner "serve (foreground) on $HOST:$PORT"
   exec "$PY" -m uvicorn server.app:app --host "$HOST" --port "$PORT" --workers "$WORKERS"
 }
@@ -139,24 +179,28 @@ cmd_status() {
 
 cmd_smoke() {
   need_venv
+  native_jit_guard
   banner "smoke against $BASE"
   exec "$PY" "$HERE/tools/smoke.py" --base "$BASE"
 }
 
 cmd_bench() {
   need_venv
+  native_jit_guard
   banner "bench against $BASE"
   exec "$PY" "$HERE/bench/bench.py" --base "$BASE" "$@"
 }
 
 cmd_equivalence() {
   need_venv
+  native_jit_guard
   banner "equivalence"
   exec "$PY" "$HERE/tools/equivalence.py" "$@"
 }
 
 cmd_test() {
   need_venv
+  native_jit_guard
   exec "$PY" -m pytest "$HERE/tests" -q "$@"
 }
 

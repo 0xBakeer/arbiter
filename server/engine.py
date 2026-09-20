@@ -63,17 +63,24 @@ def to_internal(qdef: Dict[str, Any]) -> Dict[str, Any]:
 class GraphRunner:
     """Capture and replay the forward for bucketed (batch, sequence) shapes.
 
-    One graph per (batch bucket, sequence bucket); the marker dimension is fixed at
-    `max_markers` so a question with more options than that takes the eager path rather than
-    multiplying the number of graphs. Graphs share one memory pool, and each is captured lazily
-    the first time its bucket is needed, so a server that only ever sees single questions pays
-    for exactly one graph.
+    One graph per (batch, sequence, marker) bucket. The marker dimension is bucketed rather than
+    pinned at `max_markers` because the scorer runs on every marker slot: padding a two-option
+    question out to 32 slots puts a 1024x1024 MLP over sixteen times the positions it needs, and
+    that costs more than the launch overhead the graph is here to remove. A question with more
+    options than `max_markers` takes the eager path.
+
+    Graphs share one memory pool and are captured lazily on first use of a bucket, so a server
+    that only ever sees single two-option questions pays for exactly one graph.
     """
 
-    BATCH_BUCKETS = (1, 2, 4, 8, 16, 32, 64)
-    SEQ_BUCKETS = (128, 256, 512, 1024)
+    # Fine ladders on purpose. A graph's cost is the padded shape, not the real one, so a coarse
+    # ladder taxes every request that lands just above a step: 130 real tokens rounded to 256 is
+    # a doubling of the encoder's work, which is far more than the launch overhead being saved.
+    BATCH_BUCKETS = (1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64)
+    SEQ_BUCKETS = (64, 96, 128, 160, 192, 224, 256, 320, 384, 448, 512, 640, 768, 896, 1024)
+    MARKER_BUCKETS = (2, 3, 4, 6, 8, 12, 16, 24, 32)
 
-    def __init__(self, model: torch.nn.Module, device: torch.device, pad_id: int, cls_id: int,
+    def __init__(self, model, device: torch.device, pad_id: int, cls_id: int,
                  max_len: int, max_markers: int = 32):
         self.model = model
         self.device = device
@@ -81,22 +88,21 @@ class GraphRunner:
         self.cls_id = cls_id
         self.max_markers = max_markers
         self.seq_buckets = tuple(s for s in self.SEQ_BUCKETS if s <= max_len) or (max_len,)
+        self.marker_buckets = tuple(k for k in self.MARKER_BUCKETS if k <= max_markers) or (max_markers,)
         self.pool = torch.cuda.graph_pool_handle()
         self._graphs: Dict[Tuple[int, int], Dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def bucket_for(self, n_rows: int, seq_len: int, n_markers: int) -> Optional[Tuple[int, int]]:
-        if n_markers > self.max_markers:
-            return None
+    def bucket_for(self, n_rows: int, seq_len: int, n_markers: int) -> Optional[Tuple[int, int, int]]:
         b = next((x for x in self.BATCH_BUCKETS if x >= n_rows), None)
         s = next((x for x in self.seq_buckets if x >= seq_len), None)
-        if b is None or s is None:
+        k = next((x for x in self.marker_buckets if x >= n_markers), None)
+        if b is None or s is None or k is None:
             return None
-        return b, s
+        return b, s, k
 
-    def _capture(self, key: Tuple[int, int]) -> Dict[str, Any]:
-        b, s = key
-        k = self.max_markers
+    def _capture(self, key: Tuple[int, int, int]) -> Dict[str, Any]:
+        b, s, k = key
         dev = self.device
         static = {
             "input_ids": torch.full((b, s), self.pad_id, dtype=torch.long, device=dev),
@@ -123,7 +129,7 @@ class GraphRunner:
             out_logits, out_act = self.model(**static)
         return {"graph": graph, "static": static, "logits": out_logits, "act": out_act}
 
-    def run(self, batch: Dict[str, torch.Tensor], key: Tuple[int, int]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def run(self, batch: Dict[str, torch.Tensor], key: Tuple[int, int, int]) -> Tuple[torch.Tensor, torch.Tensor]:
         with self._lock:
             entry = self._graphs.get(key)
             if entry is None:
@@ -160,10 +166,20 @@ class GraphRunner:
 # --------------------------------------------------------------------------- one checkpoint
 
 class Checkpoint:
-    """One loaded Laya checkpoint plus everything needed to run and decode a batch of rows."""
+    """One loaded Laya checkpoint plus everything needed to run and decode a batch of rows.
+
+    `dtype_mode` picks how bf16 is used, and the two are not equivalent:
+
+      autocast  fp32 parameters under `torch.autocast(bf16)`, which is what the SDK does. Matmuls
+                run in bf16; layer norms, the residual stream and the softmaxes stay fp32.
+      bf16      bf16 parameters and no autocast. Everything runs in bf16, including the residual
+                stream through 28 layers, which is where the two diverge.
+
+    Measured, the difference is not decorative: see the equivalence table in README.md.
+    """
 
     def __init__(self, name: str, models_dir: str, device: str = "cuda", mode: str = "eager",
-                 max_markers: int = 32):
+                 max_markers: int = 32, dtype_mode: str = "autocast"):
         from laya.agent import Agent
 
         self.name = name
@@ -179,18 +195,50 @@ class Checkpoint:
         self.pad_id = self.tok.pad_token_id
         self.cls_id = self.tok.cls_token_id
 
+        # ModernBERT's `reference_compile` defaults to "auto", which means torch.compile as soon
+        # as the model is on CUDA. The SDK already turns it off; set it again here because it is
+        # the difference between an eager forward and an inductor build, and this path must stay
+        # eager -- graphs mode captures the eager kernels with torch.cuda.CUDAGraph and would
+        # otherwise be capturing compiled ones.
+        for module in (self.model.encoder, getattr(self.model.encoder, "model", None)):
+            cfg = getattr(module, "config", None)
+            if cfg is not None:
+                cfg.reference_compile = False
+
         # bf16 parameters, no autocast. Only where bf16 is actually a win: pre-Ampere cards have
         # no bf16 tensor cores, and on CPU it is slower than fp32 for this size of model.
+        # bf16 is only worth anything from compute capability 8.0 up, and on CPU it is slower
+        # than fp32 at this size, so both bf16 paths collapse to plain fp32 elsewhere.
+        bf16_ok = self.device.type == "cuda" and torch.cuda.get_device_capability(self.device)[0] >= 8
+        self.dtype_mode = dtype_mode if bf16_ok else "fp32"
         self.param_dtype = torch.float32
-        if self.device.type == "cuda" and torch.cuda.get_device_capability(self.device)[0] >= 8:
+        self.autocast = self.dtype_mode == "autocast"
+        if self.dtype_mode == "bf16":
             self.model.to(torch.bfloat16)
             self.param_dtype = torch.bfloat16
+            # The act head is the one module that must stay fp32: it is fed
+            # `torch.cat([h[:, 0].float(), feats])`, where `feats` is built from the fp32 logits,
+            # so a bf16 weight meets an fp32 activation. Autocast hid that by casting the input;
+            # without autocast it is a hard dtype error. It is three small Linears, and keeping
+            # it fp32 makes the act probability marginally closer to the reference, not further.
+            self.model.act_head.to(torch.float32)
         self.model.eval()
 
         self.graphs: Optional[GraphRunner] = None
         if mode == "graphs" and self.device.type == "cuda":
-            self.graphs = GraphRunner(self.model, self.device, self.pad_id, self.cls_id,
+            self.graphs = GraphRunner(self.run_model, self.device, self.pad_id, self.cls_id,
                                       self.max_len, max_markers)
+
+    def run_model(self, **kw):
+        """The forward, under autocast or not, so every path runs the same arithmetic.
+
+        `cache_enabled=False` because autocast's weight cache and CUDA-graph capture do not mix:
+        the cache would hand a replay a tensor that belonged to the capture.
+        """
+        if not self.autocast:
+            return self.model(**kw)
+        with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16, cache_enabled=False):
+            return self.model(**kw)
 
     # -- shaping -----------------------------------------------------------------
     def build_rows(self, state, questions: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -221,14 +269,14 @@ class Checkpoint:
                 {name: b[name].to(self.device, non_blocking=True)
                  for name in ("input_ids", "attention_mask", "marker_pos", "marker_mask", "qtype")},
                 key)
-            path = "graph:%dx%d" % key
+            path = "graph:%dx%dx%d" % key
         else:
-            logits, act = self.model(
-                b["input_ids"].to(self.device),
-                b["attention_mask"].to(self.device),
-                b["marker_pos"].to(self.device),
-                b["marker_mask"].to(self.device),
-                b["qtype"].to(self.device),
+            logits, act = self.run_model(
+                input_ids=b["input_ids"].to(self.device),
+                attention_mask=b["attention_mask"].to(self.device),
+                marker_pos=b["marker_pos"].to(self.device),
+                marker_mask=b["marker_mask"].to(self.device),
+                qtype=b["qtype"].to(self.device),
             )
             path = "eager"
 
@@ -397,18 +445,21 @@ class Engine:
 
     def __init__(self, models_dir: str = "models/laya", names: Tuple[str, ...] = MODEL_NAMES,
                  device: str = "cuda", mode: str = "eager", max_batch: int = 64,
-                 wait_ms: float = 2.0, max_queue: int = 256, max_markers: int = 32):
+                 wait_ms: float = 2.0, max_queue: int = 256, max_markers: int = 32,
+                 dtype_mode: str = "autocast"):
         from laya.router import Router
 
         self.models_dir = models_dir
         self.mode = mode
+        self.dtype_mode = dtype_mode
         self.max_queue = int(max_queue)
         self.checkpoints: Dict[str, Checkpoint] = {}
         self.batchers: Dict[str, Batcher] = {}
         self.router = Router(device=device, max_loaded=len(names) or 1)
 
         for name in names:
-            ck = Checkpoint(name, models_dir, device=device, mode=mode, max_markers=max_markers)
+            ck = Checkpoint(name, models_dir, device=device, mode=mode, max_markers=max_markers,
+                            dtype_mode=dtype_mode)
             self.checkpoints[name] = ck
             self.batchers[name] = Batcher(ck, max_batch=max_batch, wait_ms=wait_ms)
             # Hand the already-built Agent to the router so it never loads a second copy.
@@ -480,4 +531,5 @@ def engine_from_env() -> Engine:
         wait_ms=float(os.environ.get("LAYA_BATCH_WAIT_MS", "2")),
         max_queue=int(os.environ.get("LAYA_MAX_QUEUE", "256")),
         max_markers=int(os.environ.get("LAYA_GRAPH_MAX_MARKERS", "32")),
+        dtype_mode=os.environ.get("LAYA_DTYPE", "autocast"),
     )
