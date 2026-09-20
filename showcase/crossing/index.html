@@ -221,7 +221,13 @@ function apply(res, now) {
   });
   onApplied(res, out, sh, action, now);
   paintHud();
-  if (out.done || (run.mode === 'replay' && ep.i >= run.log.ticks.length)) {
+  // An episode ends when the game says so or when it runs out of steps -- the same cap
+  // _lib/harness.mjs and measure.mjs run under, so the page counts an episode the way the
+  // measurements do. Reaching the cap is a finished run, not a lost one: the actor is still
+  // alive, so the games' death effects (which all test `alive`) stay off and the page just
+  // restarts. A recorded run ends with its recording instead.
+  const over = run.mode === 'replay' ? ep.i >= run.log.ticks.length : ep.i >= MAX_STEPS;
+  if (out.done || over) {
     ep.dead = true; ep.deadAt = now; ep.pending = null; ep.result = null;
     return;
   }
