@@ -84,6 +84,22 @@ CORS headers. To work on the page without a GPU, `python3 playground/serve_stub.
 with stub answers on port 8011, and `--proxy http://localhost:8010` forwards the calls to a real
 server while keeping the page same-origin.
 
+## arbiter plays
+
+Six small games the model plays in the browser: snake, hopper, crossing, paddle, mines and a
+dungeon crawl. Each tick the game writes its board down as a short piece of text, asks typed
+questions about it, and plays the answer — one `POST /v1/systemone`, one forward pass, no tokens
+generated. With `./run.sh serve` running, `open http://localhost:8010/showcase/`. The pages also
+open from disk with no server at all, playing a recorded run.
+
+It is worth being plain about what this shows: *this is a showcase of speed and of typed
+decisions, not a claim about intelligence.* The scores are measured against a random and a
+hand-written baseline on the same seeds, and the tables say where the model beats them and where
+it does not.
+
+[showcase/README.md](showcase/README.md) — the games, the harness, the measurements and how to
+add one.
+
 ## Ask it something
 
 ```bash
@@ -355,6 +371,8 @@ matter more than anything this recipe does.
 - [recipes/nvidia](recipes/nvidia/README.md) and [recipes/apple](recipes/apple/README.md) — one
   install-and-serve recipe per machine, with that machine's numbers and its own chosen dtype
 - [engines/README.md](engines/README.md) — the four methods a model backend implements
+- [showcase/README.md](showcase/README.md) — the six games, what the model decides in each, and
+  the measured scores against the random and hand-written baselines
 - [bench/results.md](bench/results.md) — every figure and how it was taken
 - [CHANGELOG.md](CHANGELOG.md) — which defaults changed when
 - [CREDITS.md](CREDITS.md) — the model, the encoders, and the API shape are other people's work

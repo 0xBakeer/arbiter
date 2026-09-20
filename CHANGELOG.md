@@ -13,15 +13,32 @@ would measure if you ran the recipe yourself. `./run.sh` prints the version it w
 
 ## Unreleased
 
-A third engine, opt-in, on a lane that already had two dtypes and one backend.
+A third engine, opt-in, on a lane that already had two dtypes and one backend — and six games the
+model plays in the browser, served from the same origin as the API.
 
 ### Defaults that changed
 
 None. `ARBITER_ENGINE` still defaults to `laya`, torch is still what a Mac serves unless it is
 told otherwise, and every figure in [bench/results.md](bench/results.md) taken before this still
-belongs to the path it was taken on.
+belongs to the path it was taken on. The showcase is static files and a read-only mount; it adds
+no state to the server and holds no engine open.
 
 ### Added
+
+- **The showcase, `/showcase/`** — six games (snake, hopper, crossing, paddle, mines, a dungeon
+  crawl) that the model plays live. Each tick encodes the board as text, asks typed questions
+  about it and plays the answer out of a single `POST /v1/systemone`; nothing is generated. One
+  shared harness in [`showcase/_lib/harness.mjs`](showcase/_lib/harness.mjs) runs both the browser
+  pages and `measure.mjs`, so the page and the measurement play the same game. A code-owned shield
+  may veto an action that ends the episode, and every intervention is counted.
+- **Measured scores for all six**, 20 episodes per policy, model against a random and a
+  hand-written baseline on the same seeds, plus AUROC against ground truth where the game has it.
+  `node showcase/measure.mjs --game all` regenerates `<game>/measurements.json`, the README tables
+  and the replay files. Every figure came from a run against a live server; none from a mock.
+- **Replays in `showcase/replay/`** — the best model episode per game, so a page opened from disk
+  with no server still plays.
+- **`GET /showcase/...`** — a read-only static mount in [`server/app.py`](server/app.py), path
+  traversal rejected, kept out of the OpenAPI schema like the playground.
 
 - **`laya_mlx` engine (Apple Silicon, opt-in)** — [`engines/laya_mlx/loader.py`](engines/laya_mlx/loader.py)
   serves the same three checkpoints through [mizorewww/laya-mlx](https://github.com/mizorewww/laya-mlx),
@@ -63,6 +80,10 @@ Full tables, the control and the cache evidence in [bench/results.md](bench/resu
   could buy" section that predicted this is replaced by what it actually bought.
 - [CREDITS.md](CREDITS.md) credits the port and the converted checkpoints;
   [engines/README.md](engines/README.md) now says which packages are here and what each runs on.
+- [showcase/README.md](showcase/README.md) — the six games with their scores side by side, how the
+  harness works, how to measure and how to add a game, and an honest section about what the
+  numbers do and do not say. A README per game with its own tables. Linked from the main README
+  under a new **arbiter plays** section.
 
 ## v0.1.1 — 2026-09-20
 
