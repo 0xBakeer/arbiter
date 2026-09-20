@@ -1,0 +1,306 @@
+{
+  "game": "dungeon",
+  "generated_at": "2026-09-20T10:45:14.192Z",
+  "server": {
+    "base": "http://localhost:8010",
+    "model": "auto",
+    "device": "mps",
+    "mode": "eager",
+    "dtype": "fp32"
+  },
+  "tick_ms": 500,
+  "questions_per_tick": 2,
+  "wall_seconds": 39.2,
+  "policies": {
+    "model": {
+      "episodes": 20,
+      "max_steps": 150,
+      "score": {
+        "mean": 116.15,
+        "median": 110.5,
+        "max": 212,
+        "all": [
+          108,
+          185,
+          111,
+          131,
+          118,
+          126,
+          66,
+          109,
+          178,
+          149,
+          110,
+          47,
+          47,
+          67,
+          153,
+          212,
+          91,
+          110,
+          85,
+          120
+        ]
+      },
+      "steps": {
+        "mean": 14.65,
+        "median": 14,
+        "max": 25
+      },
+      "decisions": {
+        "total": 293,
+        "per_episode": 14.65
+      },
+      "shield_interventions": {
+        "total": 0,
+        "per_episode": 0
+      },
+      "input_tokens": 73462,
+      "inference_ms": {
+        "n": 293,
+        "p50": 55.1,
+        "p95": 71.2,
+        "max": 74.9
+      },
+      "roundtrip_ms": {
+        "n": 293,
+        "p50": 57.7,
+        "p95": 74.2,
+        "max": 77.7
+      },
+      "decisions_per_s": 17.3,
+      "throughput_per_s": 16.8,
+      "calibration": {
+        "danger": {
+          "type": "score",
+          "n": 293,
+          "levels": 3,
+          "auroc_top_level": 0.595,
+          "exact_match": 0.157,
+          "matrix": [
+            [
+              1,
+              187,
+              0
+            ],
+            [
+              0,
+              45,
+              0
+            ],
+            [
+              4,
+              56,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    "model+shield": {
+      "episodes": 20,
+      "max_steps": 150,
+      "score": {
+        "mean": 139.9,
+        "median": 137,
+        "max": 327,
+        "all": [
+          198,
+          327,
+          166,
+          141,
+          138,
+          136,
+          40,
+          234,
+          198,
+          259,
+          130,
+          107,
+          67,
+          87,
+          108,
+          142,
+          55,
+          85,
+          40,
+          140
+        ]
+      },
+      "steps": {
+        "mean": 17,
+        "median": 16,
+        "max": 39
+      },
+      "decisions": {
+        "total": 340,
+        "per_episode": 17
+      },
+      "shield_interventions": {
+        "total": 65,
+        "per_episode": 3.25
+      },
+      "input_tokens": 85221,
+      "inference_ms": {
+        "n": 340,
+        "p50": 60.7,
+        "p95": 80.6,
+        "max": 87
+      },
+      "roundtrip_ms": {
+        "n": 340,
+        "p50": 63.2,
+        "p95": 83.2,
+        "max": 89.9
+      },
+      "decisions_per_s": 15.8,
+      "throughput_per_s": 15.7,
+      "calibration": {
+        "danger": {
+          "type": "score",
+          "n": 340,
+          "levels": 3,
+          "auroc_top_level": 0.545,
+          "exact_match": 0.147,
+          "matrix": [
+            [
+              1,
+              200,
+              0
+            ],
+            [
+              0,
+              49,
+              0
+            ],
+            [
+              8,
+              82,
+              0
+            ]
+          ]
+        }
+      }
+    },
+    "random+shield": {
+      "episodes": 20,
+      "max_steps": 150,
+      "score": {
+        "mean": 256.65,
+        "median": 241,
+        "max": 530,
+        "all": [
+          231,
+          78,
+          253,
+          483,
+          262,
+          118,
+          251,
+          454,
+          312,
+          199,
+          114,
+          131,
+          334,
+          530,
+          385,
+          163,
+          226,
+          324,
+          130,
+          155
+        ]
+      },
+      "steps": {
+        "mean": 28.55,
+        "median": 26,
+        "max": 52
+      },
+      "decisions": {
+        "total": 571,
+        "per_episode": 28.55
+      },
+      "shield_interventions": {
+        "total": 43,
+        "per_episode": 2.15
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    },
+    "heuristic+shield": {
+      "episodes": 20,
+      "max_steps": 150,
+      "score": {
+        "mean": 396.75,
+        "median": 424.5,
+        "max": 680,
+        "all": [
+          400,
+          525,
+          297,
+          680,
+          181,
+          178,
+          157,
+          421,
+          510,
+          433,
+          396,
+          182,
+          428,
+          592,
+          588,
+          435,
+          197,
+          315,
+          493,
+          527
+        ]
+      },
+      "steps": {
+        "mean": 41.4,
+        "median": 45,
+        "max": 60
+      },
+      "decisions": {
+        "total": 828,
+        "per_episode": 41.4
+      },
+      "shield_interventions": {
+        "total": 11,
+        "per_episode": 0.55
+      },
+      "input_tokens": 0,
+      "inference_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "roundtrip_ms": {
+        "n": 0,
+        "p50": null,
+        "p95": null,
+        "max": null
+      },
+      "decisions_per_s": null,
+      "throughput_per_s": null,
+      "calibration": {}
+    }
+  }
+}
