@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from . import metrics
@@ -29,6 +29,10 @@ EXPLICIT_NAMES = {
     "typed-decisions": "typed-decisions", "laya-typed-decisions": "typed-decisions",
     "typed": "typed-decisions", "typed_decisions": "typed-decisions",
 }
+
+# The playground is one self-contained page, served from the same origin as the API so that
+# it needs no configuration and the server needs no CORS headers.
+PLAYGROUND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "playground", "index.html")
 
 QTYPES_ALLOWED = ("noul", "choice", "score")
 MAX_CHOICES = 255
@@ -147,6 +151,10 @@ def create_app(engine=None) -> FastAPI:
         return None
 
     # -- endpoints ---------------------------------------------------------------
+    @app.get("/", include_in_schema=False)
+    async def playground():
+        return FileResponse(PLAYGROUND, media_type="text/html")
+
     @app.get("/healthz")
     async def healthz():
         return {"status": "ok", "version": VERSION}

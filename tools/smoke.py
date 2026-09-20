@@ -39,6 +39,12 @@ def main():
     with httpx.Client(timeout=120.0, headers=headers) as client:
         ready = client.get("%s/readyz" % args.base)
         print("readyz: %s %s" % (ready.status_code, ready.text.strip()))
+
+        page = client.get("%s/" % args.base)
+        served = page.status_code == 200 and "laya-spark" in page.text
+        print("playground: %s %s" % (page.status_code, "ok" if served else "NOT SERVED"))
+        if not served:
+            failures.append("GET / -> HTTP %d, %d bytes" % (page.status_code, len(page.content)))
         print()
 
         for case in CASES:

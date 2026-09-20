@@ -283,6 +283,19 @@ def test_auth_is_checked_before_validation():
 
 # --------------------------------------------------------------------- the other endpoints
 
+def test_root_serves_the_playground_page():
+    c, _ = client()
+    r = c.get("/")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/html")
+    assert "laya-spark" in r.text
+
+
+def test_the_playground_is_not_in_the_openapi_schema():
+    c, _ = client()
+    assert "/" not in c.get("/openapi.json").json()["paths"]
+
+
 def test_healthz_and_readyz():
     c, app = client()
     assert c.get("/healthz").json()["status"] == "ok"
