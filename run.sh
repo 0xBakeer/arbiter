@@ -177,16 +177,16 @@ PYCHECK
   local upstream_dir="$ARBITER_MODELS_DIR"
   [ "$ARBITER_ENGINE" = laya_mlx ] && upstream_dir="$MODELS_DIR/laya"
   echo "fetching the three checkpoints into $upstream_dir (~2.4 GB)"
-  local hf="$VENV/bin/hf"
-  [ -x "$hf" ] || hf="$(command -v hf)"
+  # The hub CLI is called as a module, not as $VENV/bin/hf: that script carries the absolute
+  # shebang pip wrote, so a moved or copied .venv dies on it with "bad interpreter".
   # One --exclude per pattern: the flag takes a single value, and extra patterns after it are
   # read as the positional FILENAMES list, which downloads exactly the files you meant to skip.
-  "$hf" download convaiinnovations/laya \
+  "$PY" -m huggingface_hub.cli.hf download convaiinnovations/laya \
       --local-dir "$upstream_dir" \
       --exclude "assets/*" --exclude "eval/*" --exclude "*.png" --exclude "*.jpg"
   du -sh "$upstream_dir" 2>/dev/null || true
 
-  [ "$ARBITER_ENGINE" = laya_mlx ] && setup_mlx "$hf"
+  [ "$ARBITER_ENGINE" = laya_mlx ] && setup_mlx
   banner "setup done"
 }
 
@@ -194,7 +194,6 @@ setup_mlx() {
   # laya-mlx pulls mlx, tokenizers, huggingface_hub and numpy. Every one of those is either
   # already installed here at the same version or has nothing to do with torch, so this goes in
   # the same .venv -- no sibling .venv-mlx, and `pip check` stays clean either way.
-  local hf="$1"
   echo
   echo "installing the MLX engine into the same .venv"
   "$PY" -m pip install "laya-mlx>=0.1"
@@ -214,7 +213,7 @@ PYCHECK
   # rather than an associative array: macOS ships bash 3.2, which has none.
   while read -r name repo; do
     [ -n "$name" ] || continue
-    "$hf" download "$repo" --local-dir "$ARBITER_MODELS_DIR/$name"
+    "$PY" -m huggingface_hub.cli.hf download "$repo" --local-dir "$ARBITER_MODELS_DIR/$name"
   done <<'CHECKPOINTS'
 english aac6fef/laya-mlx
 multilingual aac6fef/laya-multilingual-mlx
