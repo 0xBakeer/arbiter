@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """A PreToolUse hook that asks a local arbiter server whether a Bash command is safe to run.
 
-Claude Code sends the tool call as JSON on stdin and reads a decision as JSON on stdout. This
-hook turns that into five questions in one forward pass -- destructive, secrets, outside the
-repo, network, blast radius -- and maps the probabilities to allow, ask or deny. It adds tens of
-milliseconds to a Bash call, which is why it can run on every one of them.
+Claude Code sends the tool call as JSON on stdin and reads a decision as JSON on stdout. What the
+hook asks, and how it turns the answers into allow, ask or deny, lives in `guard_policy.py` next
+to this file; this file is the wiring: read the event, decide, write the decision, never fail the
+tool call. `eval.py` scores the policy against 117 labelled events and prints the matrix.
 
-The thresholds are here, in the hook, not in the model. Edit them: they are the only thing
-standing between "the agent works without interruption" and "the agent asks about everything".
+The first version of this hook sent the raw `cwd` and the tool description to the model and
+OR-ed five thresholds. Measured on those events it allowed 52 % of everyday commands and refused
+three of them outright -- `git rev-parse` among them -- which is the behaviour of a guard people
+turn off. The current policy allows 100 % of them and still never lets a deny-class command
+through. See `docs/use-cases.md` for the before and after.
 
 Environment:
 
     ARBITER_URL                 default http://localhost:8010
     ARBITER_API_KEY             optional bearer token
     ARBITER_GUARD_TIMEOUT       seconds to wait for the server, default 3
+    ARBITER_GUARD_MODEL         checkpoint to ask, default laya-english (measured best here)
     ARBITER_GUARD_FAIL_CLOSED   1 = ask the user when the server cannot be reached.
                              The default is fail-open: a decision server that is down must not
                              silently stop the session, so it logs and gets out of the way.
     ARBITER_GUARD_NO_AUTO_ALLOW 1 = never emit "allow"; on a clean verdict the hook says nothing
                              and the normal permission flow applies. More conservative, and
                              what to use if you do not want this hook widening what may run.
+    ARBITER_GUARD_NO_FAST_PATH  1 = send read-only commands to the server too, instead of
+                             allowing them without a round trip.
     ARBITER_GUARD_LOG           append a line per decision to this file
 """
+import importlib.util
 import json
 import os
 import sys
@@ -29,72 +36,42 @@ import time
 import urllib.error
 import urllib.request
 
+# A sibling import by path, not by package: the plugin directory gets copied around on its own,
+# so the hook must run with nothing on sys.path but itself.
+_SPEC = importlib.util.spec_from_file_location(
+    "guard_policy", os.path.join(os.path.dirname(os.path.abspath(__file__)), "guard_policy.py"))
+policy = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(policy)
+
 ARBITER_URL = os.environ.get("ARBITER_URL", "http://localhost:8010").rstrip("/")
 ARBITER_API_KEY = os.environ.get("ARBITER_API_KEY")
 TIMEOUT = float(os.environ.get("ARBITER_GUARD_TIMEOUT", "3"))
+MODEL = os.environ.get("ARBITER_GUARD_MODEL", policy.MODEL)
 FAIL_CLOSED = os.environ.get("ARBITER_GUARD_FAIL_CLOSED") == "1"
 NO_AUTO_ALLOW = os.environ.get("ARBITER_GUARD_NO_AUTO_ALLOW") == "1"
+NO_FAST_PATH = os.environ.get("ARBITER_GUARD_NO_FAST_PATH") == "1"
 LOG = os.environ.get("ARBITER_GUARD_LOG")
 
-# The same question set as examples/tool_call_guard.py and integrations/mcp/arbiter_mcp.py. It is
-# repeated rather than imported because a plugin directory gets copied around on its own.
-QUESTIONS = {
-    "is_destructive": {
-        "type": "noul",
-        "instructions": ("Running this command destroys or irreversibly changes something: "
-                         "deleting files, dropping data, force-pushing, overwriting history, "
-                         "terminating infrastructure."),
-        "criteria": {"true": "data or state is lost and cannot be trivially restored",
-                     "false": "it reads, builds, tests, or makes a change that is easy to undo"},
-    },
-    "touches_secrets": {
-        "type": "noul",
-        "instructions": ("This command reads, prints, copies or transmits credentials: private "
-                         "keys, tokens, passwords, .env files, cloud credentials, keychains."),
-    },
-    "leaves_repo": {
-        "type": "noul",
-        "instructions": "This command reads or writes outside the working directory it is run in.",
-    },
-    "needs_network": {
-        "type": "noul",
-        "instructions": "This command talks to the network: fetching, uploading, deploying, or calling an API.",
-    },
-    "blast_radius": {
-        "type": "score",
-        "instructions": "If this command does the wrong thing, how far does the damage reach?",
-        "criteria": ["nothing outside this shell session",
-                     "files in this one project",
-                     "the whole developer machine",
-                     "shared or production systems other people depend on"],
-    },
-}
-DENY_DESTRUCTIVE = 0.75
-DENY_SECRETS = 0.70
-DENY_BLAST = 2.40
-# Well above 0.5: the model is not shy about a mild yes, and `npm test` scores around 0.48 on
-# "is this destructive". A guard that stops for that is a guard people turn off.
-ASK_SIGNAL = 0.55
-ASK_BLAST = 1.50
 
-
-def log(message):
+def log(message, command=None):
+    """One line per decision, with the command on it: a guard log nobody can audit is not one."""
     if not LOG:
         return
     try:
         with open(LOG, "a", encoding="utf-8") as handle:
-            handle.write("%s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), message))
+            handle.write("%s %s%s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), message,
+                                        "  $ %s" % command.replace("\n", " ") if command else ""))
     except OSError:
         pass
 
 
-def emit(decision, reason):
+def emit(decision, reason, command=None):
     """Write the PreToolUse decision and stop.
 
     An "allow" with ARBITER_GUARD_NO_AUTO_ALLOW set becomes silence, which is not the same thing:
     silence means "no opinion, run the normal permission flow", while "allow" skips it.
     """
-    log("%s: %s" % (decision, reason))
+    log("%s: %s" % (decision, reason), command)
     if decision == "allow" and NO_AUTO_ALLOW:
         sys.exit(0)
     json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
@@ -105,7 +82,7 @@ def emit(decision, reason):
 
 
 def ask_arbiter(state):
-    body = json.dumps({"state": state, "questions": QUESTIONS, "model": "auto"}).encode()
+    body = json.dumps({"state": state, "questions": policy.QUESTIONS, "model": MODEL}).encode()
     headers = {"content-type": "application/json"}
     if ARBITER_API_KEY:
         headers["authorization"] = "Bearer %s" % ARBITER_API_KEY
@@ -115,28 +92,6 @@ def ask_arbiter(state):
         return json.loads(response.read().decode())
 
 
-def decide(answers):
-    """allow | ask | deny, and the sentence that explains it to the user."""
-    signal = {qid: (a["noul"] if a["type"] == "noul" else a["score"])
-              for qid, a in answers.items()}
-    blast = signal["blast_radius"]
-
-    if signal["touches_secrets"] >= DENY_SECRETS:
-        return "deny", "Arbiter: this reads or moves credentials (%.2f)." % signal["touches_secrets"]
-    if blast >= DENY_BLAST:
-        return "deny", ("Arbiter: blast radius %.2f of 3 -- shared or production systems." % blast)
-    if signal["is_destructive"] >= DENY_DESTRUCTIVE and blast >= 2.0:
-        return "deny", ("Arbiter: destructive (%.2f) with a machine-wide blast radius (%.2f)."
-                        % (signal["is_destructive"], blast))
-
-    hot = {k: v for k, v in signal.items() if k != "blast_radius" and v >= ASK_SIGNAL}
-    if hot or blast >= ASK_BLAST:
-        detail = ", ".join("%s %.2f" % kv for kv in sorted(hot.items(), key=lambda kv: -kv[1]))
-        return "ask", "Arbiter: %s (blast radius %.2f of 3)." % (detail or "elevated risk", blast)
-    return "allow", ("Arbiter: nothing above %.2f, blast radius %.2f of 3."
-                     % (ASK_SIGNAL, blast))
-
-
 def main():
     try:
         event = json.load(sys.stdin)
@@ -144,26 +99,28 @@ def main():
         sys.exit(0)                                      # not our business to fail the tool call
     if event.get("tool_name") != "Bash":
         sys.exit(0)
-    command = (event.get("tool_input") or {}).get("command")
+    tool_input = event.get("tool_input") or {}
+    command = tool_input.get("command")
     if not command or not command.strip():
         sys.exit(0)
 
-    state = {"command": command, "cwd": event.get("cwd", "")}
-    description = (event.get("tool_input") or {}).get("description")
-    if description:
-        state["intent"] = description
+    if not NO_FAST_PATH and policy.is_read_only(command):
+        decision, _, reason = policy.decide(None, command)     # no round trip needed
+        emit(decision, reason, command)
 
+    state = policy.build_state(command, tool_input.get("description"), event.get("cwd"))
     try:
         response = ask_arbiter(state)
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        log("unreachable: %s" % exc)
+        log("unreachable: %s" % exc, command)
         if FAIL_CLOSED:
             emit("ask", "Arbiter guard could not reach %s (%s); asking rather than guessing."
-                 % (ARBITER_URL, exc))
+                 % (ARBITER_URL, exc), command)
         print("arbiter guard: %s unreachable (%s); allowing" % (ARBITER_URL, exc), file=sys.stderr)
         sys.exit(0)
 
-    emit(*decide(response["answers"]))
+    decision, _, reason = policy.decide(response["answers"], command)
+    emit(decision, reason, command)
 
 
 if __name__ == "__main__":

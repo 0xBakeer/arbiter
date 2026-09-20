@@ -107,37 +107,15 @@ def test_email_pins_something_that_needs_answering_today():
 
 
 # --------------------------------------------------------------------- tool_call_guard
+#
+# The guard is the one example whose thresholds do not live in the script: it shares
+# integrations/claude-code/hooks/guard_policy.py with the Claude Code hook and the MCP gate
+# tool. Those three are pinned in test_guard_policy.py and test_guard_agreement.py; what is
+# left to check here is that the script uses that policy rather than a copy of it.
 
-SAFE_COMMAND = dict(is_destructive=noul(0.03), touches_secrets=noul(0.02), leaves_repo=noul(0.05),
-                    needs_network=noul(0.04), blast_radius=score(0.2, 4))
-
-
-def test_guard_allows_a_harmless_command():
-    assert route(tool_call_guard, **SAFE_COMMAND) == "allow"
-
-
-def test_guard_does_not_stop_for_a_mild_yes():
-    """`npm test` really does score about 0.48 on "is this destructive" -- that must not ask."""
-    assert route(tool_call_guard, **dict(SAFE_COMMAND, is_destructive=noul(0.48),
-                                         leaves_repo=noul(0.42),
-                                         blast_radius=score(1.22, 4))) == "allow"
-
-
-def test_guard_denies_anything_touching_credentials():
-    assert route(tool_call_guard, **dict(SAFE_COMMAND, touches_secrets=noul(0.8))) == "deny"
-
-
-def test_guard_denies_a_production_blast_radius():
-    assert route(tool_call_guard, **dict(SAFE_COMMAND, blast_radius=score(2.7, 4))) == "deny"
-
-
-def test_guard_asks_rather_than_denying_in_the_middle():
-    assert route(tool_call_guard, **dict(SAFE_COMMAND, is_destructive=noul(0.60),
-                                         blast_radius=score(1.1, 4))) == "ask"
-
-
-def test_guard_exit_codes_are_the_decision():
-    assert {"allow": 0, "ask": 1, "deny": 2}["deny"] == 2
+def test_the_guard_shares_its_policy_with_the_hook():
+    assert tool_call_guard.policy.ASK_AT < tool_call_guard.policy.DENY_AT
+    assert set(tool_call_guard.policy.WEIGHTS) == set(tool_call_guard.policy.QUESTIONS)
 
 
 # --------------------------------------------------------------------- pr_risk_gate

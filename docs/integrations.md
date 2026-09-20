@@ -61,24 +61,47 @@ claude plugin validate /ABS/PATH/integrations/claude-code     # optional, checks
 
 * **A skill**, `skills/arbiter-decisions/SKILL.md`: when to call which tool, how to shape the state
   and the questions, the option budget, and why the thresholds belong in your code.
-* **A `PreToolUse` hook on `Bash`**, `hooks/guard.py`: every shell command the agent proposes is
-  sent to `/v1/systemone` with the five tool-call-guard questions, and the hook answers with
+* **A `PreToolUse` hook on `Bash`**, [`hooks/guard.py`](../integrations/claude-code/hooks/guard.py):
+  every shell command the agent proposes is judged and the hook answers with
   `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"|"ask"|"deny",
   "permissionDecisionReason": "…"}}`.
+
+The hook is the same policy as the `tool_call_guard` example and the `arbiter_gate` MCP tool --
+all three load [`hooks/guard_policy.py`](../integrations/claude-code/hooks/guard_policy.py) -- and
+it works in three layers: read-only commands (`ls`, `git status`, `grep`, `kubectl get`) are
+allowed with no round trip, a short list of patterns the text settles (`rm -rf /`, a force-push
+to `main`, a credential path heading for a remote) raises the risk on its own, and everything in
+between goes to the model as five nouls and one score in a single forward pass. On 117 labelled
+`PreToolUse` events it allows 100 % of everyday development commands, refuses 91 % of the ones
+that must never run unattended, and never lets one of them through. The matrix, the six it still
+gets wrong, and how to re-run the measurement are in
+[`docs/use-cases.md`](use-cases.md#tool_call_guardpy----guarding-an-agents-shell-commands):
+
+```bash
+ARBITER_URL=http://localhost:8010 python3 integrations/claude-code/hooks/eval.py
+```
 
 The hook's behaviour is deliberate and worth reading before you install it:
 
 | Variable | Default | Effect |
 |---|---|---|
 | `ARBITER_GUARD_TIMEOUT` | `3` | seconds to wait for the server |
+| `ARBITER_GUARD_MODEL` | `laya-english` | the checkpoint to ask. Measured best for this task: `laya-typed-decisions` stops six everyday commands the English checkpoint waves through |
 | `ARBITER_GUARD_FAIL_CLOSED` | unset | **fail-open by default**: if the server cannot be reached the hook logs to stderr and stays out of the way. Set to `1` to have it `ask` instead. A decision service that is down should not silently stop your session -- but it should not silently approve either, and that is the switch. |
 | `ARBITER_GUARD_NO_AUTO_ALLOW` | unset | by default a clean verdict emits `"allow"`, which **skips your normal permission prompt**. Set to `1` and a clean verdict emits nothing instead, so the usual permission flow still runs and the hook can only ever add friction, never remove it. |
+| `ARBITER_GUARD_NO_FAST_PATH` | unset | `1` sends read-only commands to the server too, instead of allowing them locally |
 | `ARBITER_GUARD_LOG` | unset | append one line per decision to this file |
+
+A guard is not a sandbox. Keep your own `deny` rules in `.claude/settings.json` for the things
+you never want run whatever a model thinks -- the hook is the layer that catches what a rule list
+did not anticipate, not a replacement for one.
 
 The plugin's [`.mcp.json`](../integrations/claude-code/.mcp.json) points at
 `${CLAUDE_PLUGIN_ROOT}/../mcp/arbiter_mcp.py`, which resolves inside this checkout. If you copy the
 plugin directory somewhere else, either copy `integrations/mcp/arbiter_mcp.py` along with it and
-fix the path, or `pip install ./integrations/mcp` and change the command to `arbiter-mcp`.
+fix the path, or `pip install ./integrations/mcp` and change the command to `arbiter-mcp`. Either
+way the MCP server needs `guard_policy.py` for its `arbiter_gate` tool: it looks for it next to
+the plugin, and `ARBITER_GUARD_POLICY` points it somewhere else.
 
 ## Codex
 

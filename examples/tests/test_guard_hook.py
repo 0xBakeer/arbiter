@@ -3,6 +3,10 @@
 The hook is run the way Claude Code runs it -- as a subprocess with the event JSON on stdin --
 because the contract being tested is that stdout is exactly one JSON object of the documented
 shape, and that nothing else ever lands there.
+
+The policy the hook applies lives in `guard_policy.py` and is tested in `test_guard_policy.py`;
+what is tested here is the wiring: which fields of the event reach the server, what the three
+environment switches do, and that a server that is not there never fails a tool call.
 """
 import importlib.util
 import json
@@ -15,17 +19,18 @@ from stub_server import StubServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PLUGIN = os.path.join(ROOT, "integrations", "claude-code")
-GUARD = os.path.join(PLUGIN, "hooks", "guard.py")
+HOOKS = os.path.join(PLUGIN, "hooks")
+GUARD = os.path.join(HOOKS, "guard.py")
 
 
-def load_guard():
-    spec = importlib.util.spec_from_file_location("guard", GUARD)
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-guard = load_guard()
+policy = load("guard_policy", os.path.join(HOOKS, "guard_policy.py"))
 
 
 def noul(p):
@@ -37,8 +42,10 @@ def score(v):
             "probabilities": {"0": 0.25, "1": 0.25, "2": 0.25, "3": 0.25}, "confidence": 0.25}
 
 
-SAFE = {"is_destructive": noul(0.03), "touches_secrets": noul(0.02), "leaves_repo": noul(0.04),
-        "needs_network": noul(0.05), "blast_radius": score(0.2)}
+QUIET = {"destroys_data": noul(0.04), "reads_secrets": noul(0.03),
+         "touches_foreign_paths": noul(0.05), "sends_data_to_remote": noul(0.06),
+         "serious_harm": noul(0.02), "blast_radius": score(0.2)}
+ALARMED = dict(QUIET, serious_harm=noul(0.95), destroys_data=noul(0.92))
 
 
 def run(event, url, **env):
@@ -48,50 +55,28 @@ def run(event, url, **env):
                           text=True, env=environment, timeout=30)
 
 
-def bash(command="ls -la", cwd="/tmp/project"):
-    return {"hook_event_name": "PreToolUse", "tool_name": "Bash",
-            "tool_input": {"command": command}, "cwd": cwd}
+def bash(command="npm test", cwd="/tmp/project", description=None):
+    tool_input = {"command": command}
+    if description:
+        tool_input["description"] = description
+    return {"session_id": "3f1a", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+            "tool_input": tool_input, "cwd": cwd}
 
 
-# --------------------------------------------------------------------- the mapping
-
-def test_a_quiet_command_is_allowed():
-    assert guard.decide(SAFE)[0] == "allow"
-
-
-def test_credentials_are_denied():
-    assert guard.decide(dict(SAFE, touches_secrets=noul(0.8)))[0] == "deny"
-
-
-def test_production_blast_radius_is_denied():
-    assert guard.decide(dict(SAFE, blast_radius=score(2.7)))[0] == "deny"
-
-
-def test_the_middle_band_asks():
-    decision, reason = guard.decide(dict(SAFE, is_destructive=noul(0.6)))
-    assert decision == "ask"
-    assert "is_destructive 0.60" in reason
-
-
-def test_a_mild_yes_is_not_enough_to_interrupt():
-    assert guard.decide(dict(SAFE, is_destructive=noul(0.48)))[0] == "allow"
-
-
-def test_every_reason_names_the_number_behind_it():
-    for answers in (SAFE, dict(SAFE, touches_secrets=noul(0.9)), dict(SAFE, blast_radius=score(2.9))):
-        assert any(character.isdigit() for character in guard.decide(answers)[1])
+def decision_of(done):
+    return json.loads(done.stdout)["hookSpecificOutput"]["permissionDecision"]
 
 
 # --------------------------------------------------------------------- the wire contract
 
 @pytest.mark.parametrize("answers,expected", [
-    (SAFE, "allow"),
-    (dict(SAFE, is_destructive=noul(0.6)), "ask"),
-    (dict(SAFE, touches_secrets=noul(0.95)), "deny"),
+    (QUIET, "allow"),
+    (dict(QUIET, destroys_data=noul(0.92), serious_harm=noul(0.35)), "ask"),
+    (ALARMED, "deny"),
 ])
 def test_the_hook_emits_the_documented_json(answers, expected):
     with StubServer(scripted=answers) as stub:
-        done = run(bash("rm -rf build"), stub.url)
+        done = run(bash("npm run build"), stub.url)
     assert done.returncode == 0
     payload = json.loads(done.stdout)["hookSpecificOutput"]
     assert payload["hookEventName"] == "PreToolUse"
@@ -99,20 +84,70 @@ def test_the_hook_emits_the_documented_json(answers, expected):
     assert payload["permissionDecisionReason"].startswith("Arbiter:")
 
 
-def test_the_command_and_the_directory_reach_the_server():
-    with StubServer(scripted=SAFE) as stub:
-        run(bash("git push --force", cwd="/srv/app"), stub.url)
+def test_the_state_is_the_command_the_description_and_a_word_for_the_directory():
+    with StubServer(scripted=QUIET) as stub:
+        run(bash("npm ci", cwd="/srv/app", description="Install the dependencies"), stub.url)
         state = stub.requests[0]["state"]
-    assert state == {"command": "git push --force", "cwd": "/srv/app"}
+    assert state == {"command": "npm ci", "description": "Install the dependencies",
+                     "cwd_kind": "system"}
 
 
-def test_a_description_is_passed_as_intent():
-    event = bash()
-    event["tool_input"]["description"] = "list the build output"
-    with StubServer(scripted=SAFE) as stub:
-        run(event, stub.url)
-        assert stub.requests[0]["state"]["intent"] == "list the build output"
+def test_a_missing_description_is_simply_absent():
+    with StubServer(scripted=QUIET) as stub:
+        run(bash("npm ci", cwd="/srv/app"), stub.url)
+        assert stub.requests[0]["state"] == {"command": "npm ci", "cwd_kind": "system"}
 
+
+def test_the_hook_asks_the_shared_question_set():
+    with StubServer(scripted=QUIET) as stub:
+        run(bash(), stub.url)
+    assert stub.requests[0]["questions"] == policy.QUESTIONS
+    assert stub.requests[0]["model"] == policy.MODEL
+
+
+def test_a_scratch_directory_no_longer_changes_the_verdict():
+    """The raw cwd used to turn the same `echo` from allow into ask; a word for it does not."""
+    seen = []
+    for cwd in ("/tmp/x", "/private/tmp/claude-501/a-long-scratch-path", "/srv/app"):
+        with StubServer(scripted=QUIET) as stub:
+            done = run(bash("npm run build", cwd=cwd), stub.url)
+        seen.append(decision_of(done))
+    assert seen == ["allow", "allow", "allow"]
+
+
+# --------------------------------------------------------------------- the fast path
+
+def test_a_read_only_command_is_allowed_without_asking_anyone():
+    with StubServer(scripted=ALARMED) as stub:
+        done = run(bash("git rev-parse --show-toplevel"), stub.url)
+        assert stub.requests == [], "the fast path made a round trip"
+    assert decision_of(done) == "allow"
+
+
+def test_the_fast_path_can_be_turned_off():
+    with StubServer(scripted=ALARMED) as stub:
+        done = run(bash("git rev-parse --show-toplevel"), stub.url, ARBITER_GUARD_NO_FAST_PATH="1")
+        assert len(stub.requests) == 1
+    assert decision_of(done) == "deny"
+
+
+# --------------------------------------------------------------------- the text floors
+
+def test_a_catastrophic_command_is_denied_even_when_the_model_is_calm():
+    with StubServer(scripted=QUIET) as stub:
+        done = run(bash("git push --force origin main"), stub.url)
+    payload = json.loads(done.stdout)["hookSpecificOutput"]
+    assert payload["permissionDecision"] == "deny"
+    assert "never right by accident" in payload["permissionDecisionReason"]
+
+
+def test_a_reaching_command_is_never_silently_allowed():
+    with StubServer(scripted=QUIET) as stub:
+        done = run(bash("rm -rf build/"), stub.url)
+    assert decision_of(done) == "ask"
+
+
+# --------------------------------------------------------------------- staying out of the way
 
 @pytest.mark.parametrize("event", [
     {"tool_name": "Read", "tool_input": {"file_path": "/etc/passwd"}},
@@ -134,8 +169,6 @@ def test_malformed_input_does_not_fail_the_tool_call():
     assert done.stdout == ""
 
 
-# --------------------------------------------------------------------- server down
-
 def test_an_unreachable_server_fails_open():
     done = run(bash(), "http://127.0.0.1:1")
     assert done.returncode == 0
@@ -151,19 +184,30 @@ def test_fail_closed_asks_instead():
 
 
 def test_no_auto_allow_turns_an_allow_into_silence():
-    with StubServer(scripted=SAFE) as stub:
+    with StubServer(scripted=QUIET) as stub:
         done = run(bash(), stub.url, ARBITER_GUARD_NO_AUTO_ALLOW="1")
     assert done.stdout == ""
-    with StubServer(scripted=dict(SAFE, touches_secrets=noul(0.95))) as stub:
+    with StubServer(scripted=ALARMED) as stub:
         done = run(bash(), stub.url, ARBITER_GUARD_NO_AUTO_ALLOW="1")
-    assert json.loads(done.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert decision_of(done) == "deny"
 
 
-def test_the_log_file_records_the_decision(tmp_path):
+def test_the_log_file_records_the_decision_and_the_command_it_was_about(tmp_path):
     log = tmp_path / "guard.log"
-    with StubServer(scripted=SAFE) as stub:
-        run(bash(), stub.url, ARBITER_GUARD_LOG=str(log))
-    assert "allow" in log.read_text()
+    with StubServer(scripted=QUIET) as stub:
+        run(bash("npm run build"), stub.url, ARBITER_GUARD_LOG=str(log))
+        run(bash("git status --short"), stub.url, ARBITER_GUARD_LOG=str(log))
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2
+    assert "allow" in lines[0] and "$ npm run build" in lines[0]
+    assert "$ git status --short" in lines[1], "the fast path must be auditable too"
+
+
+def test_a_multi_line_command_stays_on_one_log_line(tmp_path):
+    log = tmp_path / "guard.log"
+    with StubServer(scripted=QUIET) as stub:
+        run(bash("npm run build\nnpm test"), stub.url, ARBITER_GUARD_LOG=str(log))
+    assert len(log.read_text().splitlines()) == 1
 
 
 # --------------------------------------------------------------------- the plugin files
@@ -182,6 +226,14 @@ def test_the_plugin_files_are_valid_json_and_point_at_files_that_exist():
     args = mcp["mcpServers"]["arbiter"]["args"]
     target = args[0].replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN)
     assert os.path.exists(target), target
+
+
+def test_the_hook_runs_with_nothing_on_the_path_but_its_own_directory():
+    """The plugin directory gets copied around on its own, so guard.py may not import the repo."""
+    done = subprocess.run([sys.executable, GUARD], input="{}", capture_output=True, text=True,
+                          cwd=os.path.dirname(ROOT), env=dict(os.environ, PYTHONPATH=""),
+                          timeout=30)
+    assert done.returncode == 0 and done.stderr == ""
 
 
 def test_the_skill_declares_a_name_and_a_description():
