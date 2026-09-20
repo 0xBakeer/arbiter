@@ -41,7 +41,22 @@ reversal is visible as a reversal.
 - **`tools/equivalence.py`**, which is the reason the defaults are what they are: 22 mixed
   questions through the SDK reference and every dtype/mode combination, reporting max |Δp| and
   argmax agreement. `autocast/eager` comes out identical to the reference at four decimals.
-- **`./run.sh`** — `setup`, `serve`, `stop`, `status`, `smoke`, `bench`, `equivalence`, `test`.
+- **Nine runnable examples** in `examples/` — support triage, inbox triage, a tool-call guard,
+  a PR risk gate, alert triage, model routing, RAG relevance, moderation and invoice fields —
+  over `examples/laya_client.py`, a single dependency-free client whose API mirrors the hosted
+  SDK. Every question set is data, every threshold is in the caller, and the captured output of
+  each one is in [docs/use-cases.md](docs/use-cases.md).
+- **Integrations for coding agents.** `integrations/mcp/laya_mcp.py` exposes `laya_check`,
+  `laya_classify`, `laya_score`, `laya_gate` and `laya_decide` over MCP; the Claude Code plugin
+  adds a skill and a `PreToolUse` hook that judges every `Bash` command in tens of milliseconds
+  and fails open when the server is not there. Ready-made configuration for Codex, OpenCode, omp
+  and any generic `.mcp.json` client, plus a GitHub Actions job that gates pull requests.
+- **A playground.** `GET /` serves `playground/index.html`, one self-contained page on the same
+  origin as the API: a state, questions of all three types, and the answers with their
+  probabilities, the checkpoint that answered and the latency. `playground/serve_stub.py` serves
+  the same page with stub answers for UI work without a GPU.
+- **`./run.sh`** — `setup`, `serve`, `stop`, `status`, `smoke`, `examples`, `bench`,
+  `equivalence`, and `test` over both suites.
 
 ### Measured
 

@@ -6,9 +6,10 @@
 #   ./run.sh stop      stop it
 #   ./run.sh status    /healthz, /readyz and /v1/models
 #   ./run.sh smoke     a handful of real requests across all three checkpoints
+#   ./run.sh examples  run examples/support_triage.py against a running server
 #   ./run.sh bench     latency and throughput against a running server
 #   ./run.sh equivalence   compare every dtype/mode path against the SDK reference
-#   ./run.sh test      the pytest suite
+#   ./run.sh test      both pytest suites: tests/ and examples/tests/
 #
 # Every setting is an environment variable; see the table in README.md.
 set -euo pipefail
@@ -186,6 +187,12 @@ cmd_smoke() {
   exec "$PY" "$HERE/tools/smoke.py" --base "$BASE"
 }
 
+cmd_examples() {
+  need_venv
+  banner "examples against $BASE"
+  LAYA_URL="$BASE" exec "$PY" "$HERE/examples/support_triage.py" "$@"
+}
+
 cmd_bench() {
   need_venv
   native_jit_guard
@@ -203,7 +210,8 @@ cmd_equivalence() {
 cmd_test() {
   need_venv
   native_jit_guard
-  exec "$PY" -m pytest "$HERE/tests" -q "$@"
+  # The server suite and the examples suite; neither needs a GPU or a running server.
+  exec "$PY" -m pytest "$HERE/tests" "$HERE/examples/tests" -q "$@"
 }
 
 usage() {
@@ -219,6 +227,7 @@ case "${1:-}" in
   restart)           shift; cmd_stop; cmd_serve "$@" ;;
   status)            shift; cmd_status "$@" ;;
   smoke)             shift; cmd_smoke "$@" ;;
+  examples)          shift; cmd_examples "$@" ;;
   bench)             shift; cmd_bench "$@" ;;
   equivalence)       shift; cmd_equivalence "$@" ;;
   test)              shift; cmd_test "$@" ;;

@@ -36,6 +36,11 @@ this server implements so that code written against Jev runs against a local Lay
 changing anything but the base URL and the key. The contract is theirs; this is a compatible
 implementation, not an affiliated or endorsed one.
 
+The vocabulary the examples and [docs/patterns.md](docs/patterns.md) are written in is theirs
+too — `noul`, `choice` and `score` as the three primitives, a state plus a set of typed
+questions as the unit of work, and speculative fan-out as the way to use them. The examples and
+the thresholds in them are ours; the way of thinking about the problem is not.
+
 ## The toolchain
 
 **[PyTorch](https://pytorch.org)** — including the CUDA 13.0 wheel index that makes the same
@@ -44,6 +49,8 @@ implementation, not an affiliated or endorsed one.
 `huggingface_hub` for the download.
 **[FastAPI](https://fastapi.tiangolo.com)** and **[uvicorn](https://www.uvicorn.org)** — the
 HTTP surface.
+**[Model Context Protocol](https://modelcontextprotocol.io)** — the `mcp` Python SDK, which
+`integrations/mcp/laya_mcp.py` is built on and which its tests drive over stdio.
 
 ---
 
