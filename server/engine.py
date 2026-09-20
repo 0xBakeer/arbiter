@@ -142,10 +142,13 @@ class Engine:
     Loading, the per-checkpoint worker thread, the queue cap, the warm-up and the shutdown are
     the same whatever the model is and live here.
 
-    `mode`, `dtype_mode` and `device` are what `/readyz` reports about how the checkpoints are
-    running; a backend that has no such distinction leaves them alone.
+    `engine`, `mode`, `dtype_mode` and `device` are what `/readyz` reports about how the
+    checkpoints are running; a backend that has no such distinction leaves them alone. `engine`
+    is set by `engine_from_env` to the package it imported, so the answer to "which backend is
+    this" comes from what was actually selected rather than from a string a backend claims.
     """
 
+    engine = "laya"
     mode = "eager"
     dtype_mode = "autocast"
     device = "cpu"
@@ -211,4 +214,6 @@ class Engine:
 def engine_from_env() -> Engine:
     """Build the configured backend. `ARBITER_ENGINE` names a package under `engines/`."""
     name = os.environ.get("ARBITER_ENGINE", "laya")
-    return importlib.import_module("engines.%s.loader" % name).from_env()
+    eng = importlib.import_module("engines.%s.loader" % name).from_env()
+    eng.engine = name
+    return eng

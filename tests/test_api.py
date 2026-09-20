@@ -302,8 +302,9 @@ def test_healthz_and_readyz():
     ready = c.get("/readyz").json()
     assert ready["status"] == "ready"
     assert ready["models"] == ["english", "multilingual", "typed-decisions"]
-    # the three facts a measurement has to be labelled with
-    assert (ready["mode"], ready["dtype"], ready["device"]) == ("eager", "autocast", "cpu")
+    # the four facts a measurement has to be labelled with
+    assert (ready["engine"], ready["mode"], ready["dtype"], ready["device"]) == (
+        "laya", "eager", "autocast", "cpu")
 
 
 def test_readyz_is_503_before_the_models_are_loaded():

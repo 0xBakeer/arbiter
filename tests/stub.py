@@ -29,6 +29,7 @@ def _answer(qdef: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class StubEngine:
+    engine = "laya"
     mode = "eager"
     dtype_mode = "autocast"
     device = "cpu"
