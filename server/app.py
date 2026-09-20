@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import FastAPI, Header, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
 from . import metrics
@@ -33,6 +33,46 @@ EXPLICIT_NAMES = {
 # The playground is one self-contained page, served from the same origin as the API so that
 # it needs no configuration and the server needs no CORS headers.
 PLAYGROUND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "playground", "index.html")
+
+# The showcase: small games the model plays in the browser, served from the same origin for the
+# same reason the playground is. Static files only; the pages talk to /v1/systemone like any
+# other client. Content types are spelled out rather than guessed, because a .mjs served as
+# application/octet-stream is a module the browser refuses to run.
+SHOWCASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "showcase")
+SHOWCASE_TYPES = {
+    ".html": "text/html", ".mjs": "text/javascript", ".js": "text/javascript",
+    ".css": "text/css", ".json": "application/json", ".md": "text/markdown",
+    ".svg": "image/svg+xml", ".png": "image/png", ".webp": "image/webp",
+    ".ico": "image/x-icon", ".woff2": "font/woff2", ".txt": "text/plain",
+}
+
+
+def showcase_file(rel: str) -> Optional[str]:
+    """Resolve a path inside showcase/, or None when it escapes or does not exist."""
+    root = os.path.realpath(SHOWCASE)
+    target = os.path.realpath(os.path.join(root, rel))
+    if target != root and not target.startswith(root + os.sep):
+        return None
+    if os.path.isdir(target):
+        target = os.path.join(target, "index.html")
+    return target if os.path.isfile(target) else None
+
+
+def showcase_games() -> List[str]:
+    """The game directories: the ones that carry a logic.mjs."""
+    if not os.path.isdir(SHOWCASE):
+        return []
+    return sorted(d for d in os.listdir(SHOWCASE)
+                  if os.path.isfile(os.path.join(SHOWCASE, d, "logic.mjs")))
+
+
+def showcase_listing() -> str:
+    """The fallback index, for a checkout that has the games but not the landing page."""
+    items = "\n".join('<li><a href="/showcase/%s/">%s</a></li>' % (g, g) for g in showcase_games())
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            "<title>arbiter plays</title></head><body><h1>arbiter plays</h1>"
+            "<p>Small games the decision model plays in real time.</p><ul>%s</ul></body></html>" % items)
 
 QTYPES_ALLOWED = ("noul", "choice", "score")
 MAX_CHOICES = 255
@@ -154,6 +194,26 @@ def create_app(engine=None) -> FastAPI:
     @app.get("/", include_in_schema=False)
     async def playground():
         return FileResponse(PLAYGROUND, media_type="text/html")
+
+    @app.get("/showcase", include_in_schema=False)
+    async def showcase_redirect():
+        return RedirectResponse("/showcase/")
+
+    @app.get("/showcase/", include_in_schema=False)
+    async def showcase_index():
+        page = showcase_file("index.html")
+        if page is None:
+            return HTMLResponse(showcase_listing())
+        return FileResponse(page, media_type="text/html")
+
+    @app.get("/showcase/{path:path}", include_in_schema=False)
+    async def showcase_asset(path: str):
+        target = showcase_file(path)
+        if target is None:
+            return JSONResponse(status_code=404, content=error_body(
+                "not_found_error", "no such file in the showcase: %s" % path))
+        ext = os.path.splitext(target)[1].lower()
+        return FileResponse(target, media_type=SHOWCASE_TYPES.get(ext, "application/octet-stream"))
 
     @app.get("/healthz")
     async def healthz():
