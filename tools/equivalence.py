@@ -3,10 +3,11 @@
 
 Three paths over the same fixed cases:
 
-  reference        laya.Agent.system_one -- fp32 parameters under torch.autocast(bf16), one
-                   forward per request, exactly as the SDK ships it
+  reference        laya.Agent.system_one, one forward per request, exactly as the SDK ships it.
+                   On CUDA that is fp32 parameters under torch.autocast(bf16); on any other
+                   device the SDK runs plain fp32, and `--reference-device` can pin it there.
   autocast/eager   the same arithmetic, but all of a checkpoint's rows in one batched forward
-  bf16/eager       bf16 parameters and no autocast, batched
+  bf16/eager       bf16 parameters and no autocast, batched; fp16/eager and fp32/eager likewise
   .../graphs       either of those replayed through a captured CUDA graph on a padded bucket
 
 Reported per checkpoint: the largest absolute difference in any reported probability, and
@@ -30,7 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cases import CASES                                     # noqa: E402
-from engines.laya.loader import SUBFOLDER, Checkpoint      # noqa: E402
+from engines.laya.loader import SUBFOLDER, Checkpoint, resolve_device      # noqa: E402
 
 
 def probs_of(answer: Dict[str, Any]) -> np.ndarray:
@@ -51,6 +52,8 @@ def free():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
 
 
 def run_reference(name: str, models_dir: str, device: str, cases: List[Dict]) -> Dict[str, Dict]:
@@ -125,19 +128,28 @@ def strip_single(d: Dict[str, Dict]) -> Dict[str, Dict]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--models-dir", default=os.environ.get("ARBITER_MODELS_DIR", "models/laya"))
-    ap.add_argument("--device", default=os.environ.get("DEVICE", "cuda"))
+    ap.add_argument("--device", default=os.environ.get("ARBITER_DEVICE", "auto"))
+    ap.add_argument("--reference-device", default=None,
+                    help="where laya.Agent runs; defaults to --device")
     ap.add_argument("--models", default=os.environ.get("ARBITER_MODELS", ",".join(SUBFOLDER)))
     ap.add_argument("--max-markers", type=int, default=int(os.environ.get("ARBITER_GRAPH_MAX_MARKERS", "32")))
-    ap.add_argument("--dtypes", default="autocast,bf16", help="which parameter modes to compare")
+    ap.add_argument("--dtypes", default=None,
+                    help="which parameter modes to compare; the device's own set by default")
     ap.add_argument("--out", default=None, help="append the markdown table to this file")
     args = ap.parse_args()
 
     names = [n.strip() for n in args.models.split(",") if n.strip()]
-    graphs_possible = args.device.startswith("cuda") and torch.cuda.is_available()
+    device = resolve_device(args.device)
+    reference_device = args.reference_device or device
+    graphs_possible = device.startswith("cuda") and torch.cuda.is_available()
 
-    dtype_modes = [d.strip() for d in args.dtypes.split(",") if d.strip()]
+    # The modes that exist on this device. On CUDA that is the pair the defaults are chosen
+    # between; on a Mac it is the three whole-model dtypes, since autocast is CUDA-only here.
+    default_dtypes = "autocast,bf16" if graphs_possible else "fp32,fp16,bf16"
+    dtype_modes = [d.strip() for d in (args.dtypes or default_dtypes).split(",") if d.strip()]
     modes = ["eager"] + (["graphs"] if graphs_possible else [])
 
+    print("device %s, reference %s, dtypes %s\n" % (device, reference_device, ",".join(dtype_modes)))
     lines = ["| checkpoint | path | questions | max abs delta p vs reference | argmax agreement |",
              "|---|---|---:|---:|---:|"]
     worst = {}
@@ -149,12 +161,12 @@ def main():
             continue
         print("== %s (%d cases, %d questions)" % (name, len(cases), sum(len(c["questions"]) for c in cases)))
 
-        ref = run_reference(name, args.models_dir, args.device, cases)
+        ref = run_reference(name, args.models_dir, reference_device, cases)
         served = {}
         for dtype_mode in dtype_modes:
             for mode in modes:
                 label = "%s/%s" % (dtype_mode, mode)
-                out, paths = run_served(name, args.models_dir, args.device, mode, cases,
+                out, paths = run_served(name, args.models_dir, device, mode, cases,
                                         args.max_markers, dtype_mode)
                 served[label] = out
                 w, agree, total, moved = compare(ref, strip_single(out))

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # arbiter -- a Jev-compatible System One server over the Laya decision checkpoints.
 #
-#   ./run.sh setup     create .venv, install torch (cu130) and the deps, fetch the checkpoints
+#   ./run.sh setup     create .venv, install torch (cu130 on Linux, PyPI on macOS), the deps,
+#                      and fetch the checkpoints
 #   ./run.sh serve     start the server detached on $PORT, with a pid file and a log
 #   ./run.sh stop      stop it
 #   ./run.sh status    /healthz, /readyz and /v1/models
@@ -19,9 +20,13 @@ cd "$HERE"
 
 VERSION="$(cat "$HERE/VERSION")"
 
+UNAME_S="$(uname -s)"
+
 PORT="${PORT:-8010}"
 HOST="${HOST:-0.0.0.0}"
-DEVICE="${DEVICE:-cuda}"
+# `auto` is resolved once by the engine: cuda if there is a CUDA device, else mps on Apple
+# silicon, else cpu. Set it to pin one; /readyz reports which one was taken.
+ARBITER_DEVICE="${ARBITER_DEVICE:-auto}"
 ARBITER_MODELS="${ARBITER_MODELS:-english,multilingual,typed-decisions}"
 ARBITER_MODE="${ARBITER_MODE:-eager}"
 ARBITER_DTYPE="${ARBITER_DTYPE:-autocast}"
@@ -32,7 +37,13 @@ ARBITER_MAX_QUEUE="${ARBITER_MAX_QUEUE:-256}"
 ARBITER_GRAPH_MAX_MARKERS="${ARBITER_GRAPH_MAX_MARKERS:-32}"
 MODELS_DIR="${MODELS_DIR:-$HERE/models}"
 ARBITER_MODELS_DIR="${ARBITER_MODELS_DIR:-$MODELS_DIR/laya}"
-TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu130}"
+# The CUDA wheels are Linux and Windows only. On macOS the plain PyPI wheels are the MPS-enabled
+# arm64 builds, so the index is left empty there and pip takes its default.
+if [ "$UNAME_S" = Darwin ]; then
+  TORCH_INDEX="${TORCH_INDEX-}"
+else
+  TORCH_INDEX="${TORCH_INDEX:-https://download.pytorch.org/whl/cu130}"
+fi
 WORKERS="${WORKERS:-1}"
 
 VENV="$HERE/.venv"
@@ -41,7 +52,7 @@ LOGS="$HERE/logs"
 PIDFILE="$LOGS/arbiter.pid"
 BASE="http://127.0.0.1:$PORT"
 
-export PORT HOST DEVICE ARBITER_MODELS ARBITER_MODE ARBITER_DTYPE ARBITER_API_KEY ARBITER_BATCH_WAIT_MS ARBITER_MAX_BATCH \
+export PORT HOST ARBITER_DEVICE ARBITER_MODELS ARBITER_MODE ARBITER_DTYPE ARBITER_API_KEY ARBITER_BATCH_WAIT_MS ARBITER_MAX_BATCH \
        ARBITER_MAX_QUEUE ARBITER_GRAPH_MAX_MARKERS ARBITER_MODELS_DIR
 export ARBITER_VERSION="$VERSION"
 
@@ -84,6 +95,15 @@ native_jit_guard() {
   fi
 }
 
+mac_graphs_guard() {
+  # CUDA graphs are CUDA graphs. On a Mac the flag can only be a mistake, and it is worth saying
+  # so here rather than as a load failure inside uvicorn thirty seconds later.
+  if [ "$UNAME_S" = Darwin ] && [ "$ARBITER_MODE" = graphs ]; then
+    echo "ARBITER_MODE=graphs is CUDA graph capture and there is no CUDA here; use eager" >&2
+    exit 2
+  fi
+}
+
 cmd_setup() {
   banner "setup"
   mkdir -p "$LOGS" "$MODELS_DIR"
@@ -100,7 +120,11 @@ cmd_setup() {
   "$PY" -m pip install --upgrade pip wheel >/dev/null
   # torch first and from the CUDA index, so the rest resolve against the build that is staying.
   # torchvision and torchaudio are not installed: nothing here uses them.
-  "$PY" -m pip install torch --index-url "$TORCH_INDEX"
+  if [ -n "$TORCH_INDEX" ]; then
+    "$PY" -m pip install torch --index-url "$TORCH_INDEX"
+  else
+    "$PY" -m pip install torch
+  fi
   # mcp is not needed to serve, but `./run.sh test` covers integrations/mcp over stdio, and a
   # fresh setup should be able to run both suites.
   "$PY" -m pip install \
@@ -113,6 +137,8 @@ import torch
 print("torch", torch.__version__, "cuda", torch.version.cuda, "available", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("device", torch.cuda.get_device_name(0), "capability", torch.cuda.get_device_capability(0))
+elif torch.backends.mps.is_available():
+    print("device mps, built", torch.backends.mps.is_built())
 PYCHECK
 
   echo
@@ -131,7 +157,8 @@ PYCHECK
 cmd_serve() {
   need_venv
   native_jit_guard
-  banner "serve on $HOST:$PORT (mode=$ARBITER_MODE dtype=$ARBITER_DTYPE device=$DEVICE models=$ARBITER_MODELS)"
+  mac_graphs_guard
+  banner "serve on $HOST:$PORT (mode=$ARBITER_MODE dtype=$ARBITER_DTYPE device=$ARBITER_DEVICE models=$ARBITER_MODELS)"
   mkdir -p "$LOGS"
   if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "already running as pid $(cat "$PIDFILE")" >&2
@@ -157,6 +184,7 @@ cmd_serve() {
 cmd_serve_foreground() {
   need_venv
   native_jit_guard
+  mac_graphs_guard
   banner "serve (foreground) on $HOST:$PORT"
   exec "$PY" -m uvicorn server.app:app --host "$HOST" --port "$PORT" --workers "$WORKERS"
 }
