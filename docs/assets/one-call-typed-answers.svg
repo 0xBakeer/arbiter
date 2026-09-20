@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" class="laya-diagram" viewBox="0 0 900 300" width="900" height="300" role="img" aria-labelledby="t1 d1">
+  <title id="t1">One call, many typed answers</title>
+  <desc id="d1">A state and a set of typed questions go into the Laya encoder, which runs one forward pass and returns a typed answer with probabilities for every question.</desc>
+  <style>
+    .laya-diagram { --ink: #121729; --muted: #5F6883; --line: #C6CCDB; --track: #E9ECF3; --accent: #2A56E8; --accent2: #DE5F0A;
+      color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 13px; }
+    @media (prefers-color-scheme: dark) {
+      .laya-diagram { --ink: #E9EDF7; --muted: #8B95B3; --line: #2B3758; --track: #1B2440; --accent: #5583FF; --accent2: #FF8C33; }
+    }
+    .laya-diagram .box { fill: none; stroke: var(--line); stroke-width: 1; rx: 6; }
+    .laya-diagram .t { fill: currentColor; }
+    .laya-diagram .m { fill: var(--muted); }
+    .laya-diagram .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .laya-diagram .small { font-size: 11px; }
+    .laya-diagram .head { font-size: 14px; font-weight: 600; }
+    .laya-diagram .arrow { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+    .laya-diagram .ah { fill: var(--muted); }
+    .laya-diagram .track { fill: var(--track); }
+    .laya-diagram .fill { fill: var(--line); }
+    .laya-diagram .win { fill: var(--accent); }
+    .laya-diagram .mark { stroke: var(--accent2); stroke-width: 2; }
+    .laya-diagram .accent2 { fill: var(--accent2); }
+    .laya-diagram .layer { fill: none; stroke: var(--line); stroke-width: 1; }
+    .laya-diagram .needle { fill: currentColor; }
+  </style>
+
+  <!-- request -->
+  <rect class="box" x="20" y="30" width="260" height="240"/>
+  <text class="t head" x="36" y="56">one request</text>
+  <text class="m small" x="36" y="82">state</text>
+  <text class="t mono" x="36" y="100">"Charged twice this month.</text>
+  <text class="t mono" x="36" y="116">If this is not fixed by Friday</text>
+  <text class="t mono" x="36" y="132">I am cancelling."</text>
+  <text class="m small" x="36" y="162">questions</text>
+  <text class="t mono" x="36" y="182">department</text><text class="m mono" x="170" y="182">choice</text>
+  <text class="t mono" x="36" y="202">urgency</text><text class="m mono" x="170" y="202">score</text>
+  <text class="t mono" x="36" y="222">refund_requested</text><text class="m mono" x="170" y="222">noul</text>
+  <text class="t mono" x="36" y="242">churn_risk</text><text class="m mono" x="170" y="242">noul</text>
+
+  <!-- arrow -->
+  <path class="arrow" d="M282 150 H322"/><path class="ah" d="M322 145 l9 5 -9 5z"/>
+
+  <!-- encoder -->
+  <rect class="box" x="336" y="30" width="220" height="240"/>
+  <text class="t head" x="352" y="56">Laya encoder</text>
+  <text class="m" x="352" y="76">one forward pass</text>
+  <rect class="layer" x="352" y="94" width="188" height="14" rx="3"/>
+  <rect class="layer" x="352" y="112" width="188" height="14" rx="3"/>
+  <rect class="layer" x="352" y="130" width="188" height="14" rx="3"/>
+  <rect class="layer" x="352" y="148" width="188" height="14" rx="3"/>
+  <text class="m small" x="446" y="182" text-anchor="middle">bidirectional layers</text>
+  <rect class="layer" x="352" y="196" width="188" height="22" rx="3"/>
+  <text class="m small" x="446" y="211" text-anchor="middle">typed decision head</text>
+  <text class="t" x="352" y="250">no tokens generated</text>
+  <text class="accent2 mono" x="540" y="250" text-anchor="end">~10 ms</text>
+
+  <!-- arrow -->
+  <path class="arrow" d="M558 150 H598"/><path class="ah" d="M598 145 l9 5 -9 5z"/>
+
+  <!-- answers -->
+  <rect class="box" x="612" y="30" width="270" height="240"/>
+  <text class="t head" x="628" y="56">typed answers</text>
+
+  <text class="t mono" x="628" y="82">department</text><text class="m mono small" x="866" y="82" text-anchor="end">confidence 0.82</text>
+  <text class="m small" x="628" y="98">billing</text>
+  <rect class="track" x="690" y="91" width="140" height="6" rx="3"/><rect class="win" x="690" y="91" width="113" height="6" rx="3"/>
+  <text class="t mono small" x="866" y="98" text-anchor="end">0.81</text>
+  <text class="m small" x="628" y="112">technical</text>
+  <rect class="track" x="690" y="105" width="140" height="6" rx="3"/><rect class="fill" x="690" y="105" width="17" height="6" rx="3"/>
+  <text class="m mono small" x="866" y="112" text-anchor="end">0.12</text>
+
+  <text class="t mono" x="628" y="142">urgency</text><text class="m mono small" x="866" y="142" text-anchor="end">expected 1.62</text>
+  <rect class="track" x="628" y="150" width="76" height="18" rx="2"/><rect class="fill" x="628" y="164" width="76" height="4" rx="2"/>
+  <rect class="track" x="708" y="150" width="76" height="18" rx="2"/><rect class="fill" x="708" y="160" width="76" height="8" rx="2"/>
+  <rect class="track" x="788" y="150" width="76" height="18" rx="2"/><rect class="win" x="788" y="153" width="76" height="15" rx="2"/>
+  <line class="mark" x1="801" y1="146" x2="801" y2="172"/>
+  <text class="m small" x="666" y="182" text-anchor="middle">can wait</text>
+  <text class="m small" x="746" y="182" text-anchor="middle">this week</text>
+  <text class="t small" x="826" y="182" text-anchor="middle">today</text>
+
+  <text class="t mono" x="628" y="212">refund_requested</text><text class="t mono small" x="866" y="212" text-anchor="end">0.71</text>
+  <text class="m small" x="628" y="230">false</text>
+  <rect class="track" x="666" y="222" width="164" height="8" rx="4"/><rect class="win" x="666" y="222" width="116" height="8" rx="4"/>
+  <rect class="needle" x="781" y="218" width="2" height="16" rx="1"/>
+  <text class="m small" x="866" y="230" text-anchor="end">true</text>
+
+  <text class="t mono" x="628" y="256">churn_risk</text><text class="t mono small" x="866" y="256" text-anchor="end">0.88</text>
+  <rect class="track" x="712" y="249" width="118" height="8" rx="4"/><rect class="win" x="712" y="249" width="104" height="8" rx="4"/>
+  <rect class="needle" x="815" y="245" width="2" height="16" rx="1"/>
+
+  <text class="m small" x="450" y="292" text-anchor="middle">every question in the call is answered in the same pass; the probabilities are calibrated, so a threshold in your code is a decision</text>
+</svg>
