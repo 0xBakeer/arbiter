@@ -2,7 +2,8 @@
 # arbiter -- a Jev-compatible System One server over the Laya decision checkpoints.
 #
 #   ./run.sh setup     create .venv, install torch (cu130 on Linux, PyPI on macOS), the deps,
-#                      and fetch the checkpoints
+#                      and fetch the checkpoints. ARBITER_ENGINE=laya_mlx adds the Apple-silicon
+#                      MLX engine: laya-mlx, mlx, and the three converted checkpoints
 #   ./run.sh serve     start the server detached on $PORT, with a pid file and a log
 #   ./run.sh stop      stop it
 #   ./run.sh status    /healthz, /readyz and /v1/models
@@ -29,14 +30,30 @@ HOST="${HOST:-0.0.0.0}"
 ARBITER_DEVICE="${ARBITER_DEVICE:-auto}"
 ARBITER_MODELS="${ARBITER_MODELS:-english,multilingual,typed-decisions}"
 ARBITER_MODE="${ARBITER_MODE:-eager}"
-ARBITER_DTYPE="${ARBITER_DTYPE:-autocast}"
+# Which package under engines/ answers. `laya` is torch and runs everywhere; `laya_mlx` is the
+# MLX port and is Apple silicon only, opt-in, and has its own weights and its own dtype default.
+ARBITER_ENGINE="${ARBITER_ENGINE:-laya}"
+# `autocast` is a CUDA mode and the MLX engine has no equivalent of it; fp32 is what that lane
+# ships, for the reason its equivalence table gives.
+if [ "$ARBITER_ENGINE" = laya_mlx ]; then
+  ARBITER_DTYPE="${ARBITER_DTYPE:-fp32}"
+else
+  ARBITER_DTYPE="${ARBITER_DTYPE:-autocast}"
+fi
 ARBITER_API_KEY="${ARBITER_API_KEY:-}"
 ARBITER_BATCH_WAIT_MS="${ARBITER_BATCH_WAIT_MS:-2}"
 ARBITER_MAX_BATCH="${ARBITER_MAX_BATCH:-64}"
 ARBITER_MAX_QUEUE="${ARBITER_MAX_QUEUE:-256}"
 ARBITER_GRAPH_MAX_MARKERS="${ARBITER_GRAPH_MAX_MARKERS:-32}"
+# laya_mlx only: how much freed GPU memory MLX may keep for reuse. Unbounded is its own default
+# and the wrong one for a server; 0 restores it.
+ARBITER_MLX_CACHE_MB="${ARBITER_MLX_CACHE_MB:-1024}"
 MODELS_DIR="${MODELS_DIR:-$HERE/models}"
-ARBITER_MODELS_DIR="${ARBITER_MODELS_DIR:-$MODELS_DIR/laya}"
+if [ "$ARBITER_ENGINE" = laya_mlx ]; then
+  ARBITER_MODELS_DIR="${ARBITER_MODELS_DIR:-$MODELS_DIR/laya-mlx}"
+else
+  ARBITER_MODELS_DIR="${ARBITER_MODELS_DIR:-$MODELS_DIR/laya}"
+fi
 # The CUDA wheels are Linux and Windows only. On macOS the plain PyPI wheels are the MPS-enabled
 # arm64 builds, so the index is left empty there and pip takes its default.
 if [ "$UNAME_S" = Darwin ]; then
@@ -53,7 +70,8 @@ PIDFILE="$LOGS/arbiter.pid"
 BASE="http://127.0.0.1:$PORT"
 
 export PORT HOST ARBITER_DEVICE ARBITER_MODELS ARBITER_MODE ARBITER_DTYPE ARBITER_API_KEY ARBITER_BATCH_WAIT_MS ARBITER_MAX_BATCH \
-       ARBITER_MAX_QUEUE ARBITER_GRAPH_MAX_MARKERS ARBITER_MODELS_DIR
+       ARBITER_MAX_QUEUE ARBITER_GRAPH_MAX_MARKERS ARBITER_MODELS_DIR ARBITER_ENGINE \
+       ARBITER_MLX_CACHE_MB
 export ARBITER_VERSION="$VERSION"
 
 banner() { echo "arbiter $VERSION -- $1"; }
@@ -104,8 +122,19 @@ mac_graphs_guard() {
   fi
 }
 
+mlx_guard() {
+  # The mlx wheels are arm64 macOS only and there is nothing to fall back to. The engine refuses
+  # the same machine with the same sentence at startup; saying it here saves a setup that would
+  # install nothing usable.
+  if [ "$ARBITER_ENGINE" = laya_mlx ] && { [ "$UNAME_S" != Darwin ] || [ "$(uname -m)" != arm64 ]; }; then
+    echo "ARBITER_ENGINE=laya_mlx needs MLX, which is Apple silicon only; this is $UNAME_S/$(uname -m)" >&2
+    exit 2
+  fi
+}
+
 cmd_setup() {
   banner "setup"
+  mlx_guard
   mkdir -p "$LOGS" "$MODELS_DIR"
 
   if [ ! -x "$PY" ]; then
@@ -142,23 +171,64 @@ elif torch.backends.mps.is_available():
 PYCHECK
 
   echo
-  echo "fetching the three checkpoints into $ARBITER_MODELS_DIR (~2.4 GB)"
+  # On the MLX lane `ARBITER_MODELS_DIR` is the converted tree, but the upstream one is still
+  # wanted: it is what `ARBITER_ENGINE=laya` serves on the same checkout and what the
+  # equivalence gate's reference -- `laya.Agent` under torch -- loads.
+  local upstream_dir="$ARBITER_MODELS_DIR"
+  [ "$ARBITER_ENGINE" = laya_mlx ] && upstream_dir="$MODELS_DIR/laya"
+  echo "fetching the three checkpoints into $upstream_dir (~2.4 GB)"
   local hf="$VENV/bin/hf"
   [ -x "$hf" ] || hf="$(command -v hf)"
   # One --exclude per pattern: the flag takes a single value, and extra patterns after it are
   # read as the positional FILENAMES list, which downloads exactly the files you meant to skip.
   "$hf" download convaiinnovations/laya \
-      --local-dir "$ARBITER_MODELS_DIR" \
+      --local-dir "$upstream_dir" \
       --exclude "assets/*" --exclude "eval/*" --exclude "*.png" --exclude "*.jpg"
-  du -sh "$ARBITER_MODELS_DIR" 2>/dev/null || true
+  du -sh "$upstream_dir" 2>/dev/null || true
+
+  [ "$ARBITER_ENGINE" = laya_mlx ] && setup_mlx "$hf"
   banner "setup done"
+}
+
+setup_mlx() {
+  # laya-mlx pulls mlx, tokenizers, huggingface_hub and numpy. Every one of those is either
+  # already installed here at the same version or has nothing to do with torch, so this goes in
+  # the same .venv -- no sibling .venv-mlx, and `pip check` stays clean either way.
+  local hf="$1"
+  echo
+  echo "installing the MLX engine into the same .venv"
+  "$PY" -m pip install "laya-mlx>=0.1"
+  "$PY" -m pip check || true
+  "$PY" - <<'PYCHECK'
+import mlx.core as mx
+
+import laya_mlx
+
+print("laya-mlx", laya_mlx.__version__, "mlx", mx.__version__, "device", mx.default_device())
+PYCHECK
+
+  echo
+  echo "fetching the three converted checkpoints into $ARBITER_MODELS_DIR (~2.1 GB)"
+  # One repo per checkpoint, unlike the upstream bundle, and named here by the checkpoint name
+  # the server uses so that `models/laya-mlx/<name>` is what the engine looks for. A here-doc
+  # rather than an associative array: macOS ships bash 3.2, which has none.
+  while read -r name repo; do
+    [ -n "$name" ] || continue
+    "$hf" download "$repo" --local-dir "$ARBITER_MODELS_DIR/$name"
+  done <<'CHECKPOINTS'
+english aac6fef/laya-mlx
+multilingual aac6fef/laya-multilingual-mlx
+typed-decisions aac6fef/laya-typed-decisions-mlx
+CHECKPOINTS
+  du -sh "$ARBITER_MODELS_DIR" 2>/dev/null || true
 }
 
 cmd_serve() {
   need_venv
   native_jit_guard
   mac_graphs_guard
-  banner "serve on $HOST:$PORT (mode=$ARBITER_MODE dtype=$ARBITER_DTYPE device=$ARBITER_DEVICE models=$ARBITER_MODELS)"
+  mlx_guard
+  banner "serve on $HOST:$PORT (engine=$ARBITER_ENGINE mode=$ARBITER_MODE dtype=$ARBITER_DTYPE device=$ARBITER_DEVICE models=$ARBITER_MODELS)"
   mkdir -p "$LOGS"
   if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     echo "already running as pid $(cat "$PIDFILE")" >&2
@@ -188,7 +258,8 @@ cmd_serve_foreground() {
   need_venv
   native_jit_guard
   mac_graphs_guard
-  banner "serve (foreground) on $HOST:$PORT"
+  mlx_guard
+  banner "serve (foreground) on $HOST:$PORT (engine=$ARBITER_ENGINE)"
   exec "$PY" -m uvicorn server.app:app --host "$HOST" --port "$PORT" --workers "$WORKERS"
 }
 
@@ -236,7 +307,11 @@ cmd_bench() {
 cmd_equivalence() {
   need_venv
   native_jit_guard
-  banner "equivalence"
+  banner "equivalence ($ARBITER_ENGINE)"
+  if [ "$ARBITER_ENGINE" = laya_mlx ]; then
+    mlx_guard
+    exec "$PY" "$HERE/tools/equivalence_mlx.py" "$@"
+  fi
   exec "$PY" "$HERE/tools/equivalence.py" "$@"
 }
 
