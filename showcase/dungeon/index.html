@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>arbiter plays dungeon</title>
+<meta name="description" content="The Laya decision model plays a rogue-lite written in prose: three to five typed options per room and a danger score.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_lib/theme.css">
+</head>
+<body>
+<header class="top wrap">
+  <div class="brand"><a href="../"><span class="wordmark">arbiter plays</span></a><span class="sub">dungeon</span></div>
+  <span class="spacer"></span>
+  <a class="back" href="../">All games</a>
+</header>
+
+<main class="game wrap">
+  <section class="board" aria-label="Board">
+    <div class="stage" id="stage">
+      <canvas id="board" aria-label="Dungeon room"></canvas>
+      <div class="hud" aria-live="off">
+        <div class="corner l">
+          <div class="stat big"><b id="hudScore">0</b><span>score</span></div>
+          <div class="stat"><b id="hudSecond">0</b><span>room</span></div>
+        </div>
+        <div class="corner r">
+          <div class="stat best" id="hudBestStat"><b id="hudBest">0</b><span>best</span></div>
+          <div class="ep" title="Episode progress"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="fg" id="ring" cx="18" cy="18" r="15"/></svg><small id="stepText">0 / 0</small></div>
+        </div>
+      </div>
+      <div class="overlay" id="overlay"><div class="card"><h2 id="ovTitle"></h2><p id="ovText"></p></div></div>
+    </div>
+  </section>
+  <aside id="panel" aria-label="What the model answered"></aside>
+</main>
+
+<footer class="keys wrap">
+  <span class="chip" id="status" data-mode="down" aria-live="polite"><span class="dot"></span><span id="statusText">looking for the server</span></span>
+  <button data-key="pause"><kbd>Space</kbd> pause</button>
+  <button data-key="slower"><kbd>&darr;</kbd> slower</button>
+  <button data-key="faster"><kbd>&uarr;</kbd> faster</button>
+  <button data-key="reset"><kbd>R</kbd> reset</button>
+  <button data-key="policy" aria-pressed="true"><kbd>M</kbd> <span id="policyText">model</span></button>
+  <button data-key="shield" aria-pressed="true"><kbd>S</kbd> shield</button>
+  <button data-key="back"><kbd>Q</kbd> all games</button>
+  <span class="chip speed" id="badge" title="Speed">1&times;</span>
+</footer>
+
+<script>
+/* Opened from disk in a browser that refuses module scripts on file:// (Chrome): say so, with the fix. */
+if (location.protocol === 'file:') setTimeout(function () {
+  if (window.__arbiterPlays) return;
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('ovTitle').textContent = 'This browser will not run the page from disk';
+  document.getElementById('ovText').innerHTML = 'Chrome blocks module scripts on file:// pages. Serve the folder instead: <b>python3 -m http.server</b> in the repo root, then open <b>/showcase/dungeon/</b>. Safari and Firefox open this file directly and play the recorded run.';
+  document.getElementById('statusText').textContent = 'Not running';
+}, 1200);
+</script>
+<script type="module">
+'use strict';
+import { mountPanel } from '../_lib/panel.js';
+import { drawDecisionHalo, drawBoardDepth, drawDangerVignette, createParticles, createShake, countUp, ringProgress, COLORS } from '../_lib/board.js';
+window.__arbiterPlays = true;
+
+/* =====================================================================================
+   GENERIC PART — every game page keeps this as is: server probe, live/replay runner with
+   sub-tick timing (the model is asked for the NEXT move while the current one animates),
+   keys, HUD, pulse, panel wiring. The block marked DUNGEON at the bottom (drawing + the
+   three hooks onEpisodeStart / onApplied / onNextDecision) changes per game.
+   ===================================================================================== */
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+const fromDisk = location.protocol === 'file:';
+const BASE = (params.get('base') || (fromDisk ? 'http://localhost:8010' : location.origin)).replace(/\/+$/, '');
+const SPEEDS = [0.5, 0.75, 1, 1.5, 2, 3, 4];
+const REPLAY_URL = '../replay/dungeon.json';
+const BEST_KEY = 'arbiter.plays.dungeon.best';
+
+let logic, createClient;
+try {
+  const m = await import('./logic.mjs'); logic = m.default || m;
+  ({ createClient } = await import('../_lib/client.mjs'));
+} catch (e) {
+  overlay(true, 'The game modules did not load', esc(String(e.message || e)));
+  throw e;
+}
+const meta = logic.meta || {};
+const TICK_MS = meta.tick_ms || 160;
+const MAX_STEPS = meta.max_steps || 400;
+
+/* ---- page chrome ---- */
+const panel = mountPanel($('panel'), { meta, questions: logic.questions(logic.init(1)), strip: false });
+const canvas = $('board'), ctx = canvas.getContext('2d');
+let dpr = 1, W = 0, H = 0;
+new ResizeObserver(() => {
+  const r = canvas.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  W = Math.round(r.width * dpr); H = Math.round(r.height * dpr); canvas.width = W; canvas.height = H;
+}).observe(canvas);
+
+function overlay(show, title, text) {
+  $('overlay').classList.toggle('show', !!show);
+  if (title != null) $('ovTitle').textContent = title;
+  if (text != null) $('ovText').innerHTML = text;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---- run state ---- */
+const run = {
+  mode: 'down',            // live | replay | down
+  policy: 'model',         // model | heuristic
+  shield: true,
+  speedIx: 2,
+  paused: false,
+  engine: '—',
+  connected: false,
+  client: null,
+  log: null,               // the recorded run when mode === replay
+  seedCount: 0,
+};
+const ep = { state: null, prev: null, tickStart: 0, pending: null, result: null, dead: false, deadAt: 0, headHot: 0, i: 0, bornAt: 0 };
+const counters = { decisions: 0, interventions: 0, tokens: 0 };
+const roundtrips = [];     // the last 20 round trips: decisions per second = what the model could sustain
+let best = +(localStorage.getItem(BEST_KEY) || 0);
+$('hudBest').textContent = String(best);
+
+const speed = () => SPEEDS[run.speedIx];
+const tickDur = () => TICK_MS / speed();
+
+function paintStatus() {
+  const st = $('status');
+  st.dataset.mode = run.mode === 'live' && !run.connected ? 'down' : run.mode;
+  if (run.mode === 'live') $('statusText').innerHTML = run.connected ? `Live &middot; <b>${esc(run.engine)}</b>` : 'Live &middot; server not answering, playing the heuristic';
+  else if (run.mode === 'replay') $('statusText').innerHTML = `Recorded run &middot; <b>${esc(run.engine)}</b>`;
+  else $('statusText').textContent = 'No server and no recording';
+  $('badge').textContent = speed() + '×';
+  $('policyText').textContent = run.policy;
+  const pol = document.querySelector('[data-key="policy"]'), sh = document.querySelector('[data-key="shield"]');
+  pol.setAttribute('aria-pressed', String(run.policy === 'model')); sh.setAttribute('aria-pressed', String(run.shield));
+  pol.disabled = sh.disabled = run.mode === 'replay';
+  pol.title = sh.title = run.mode === 'replay' ? 'Not available in a recorded run' : '';
+  panel.setStatus({ mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield });
+}
+
+/* ---- the cobalt pulse: actor -> panel on every model call ---- */
+let pulses = 0;
+function firePulse() {
+  if (pulses >= 4 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const from = actorPixel(ep.state); if (!from) return;
+  const cr = canvas.getBoundingClientRect();
+  const target = document.querySelector('#panel .sec') || $('panel');
+  const tr = target.getBoundingClientRect();
+  const x0 = cr.left + from[0], y0 = cr.top + from[1];
+  const x1 = tr.left + 6, y1 = tr.top + 8;
+  const p = document.createElement('i'); p.className = 'pulse'; document.body.appendChild(p); pulses++;
+  const anim = p.animate([
+    { transform: `translate(${x0}px, ${y0}px) scale(.6)`, opacity: 0 },
+    { transform: `translate(${x0}px, ${y0}px) scale(1)`, opacity: 1, offset: .12 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1)`, opacity: .9, offset: .92 },
+    { transform: `translate(${x1}px, ${y1}px) scale(1.6)`, opacity: 0 },
+  ], { duration: Math.min(420, Math.max(220, tickDur() * .9)), easing: 'cubic-bezier(.3,.6,.2,1)' });
+  anim.onfinish = () => { p.remove(); pulses--; panel.flash(); };
+}
+
+/* ---- asking for the next move ---- */
+async function askLive(state) {
+  const qs = logic.questions(state);
+  firePulse();
+  let res = null, err = null;
+  try { res = await run.client.ask(logic.encode(state), qs); }
+  catch (e) { err = e; }
+  const modelDecision = res ? logic.decide(state, res.answers) : null;
+  const heuristicAction = logic.heuristic(state);
+  const decision = run.policy === 'model' && modelDecision
+    ? modelDecision
+    : { action: heuristicAction, extras: { ...(modelDecision && modelDecision.extras), model_action: modelDecision ? modelDecision.action : null } };
+  if (res) {
+    const engine = res.routing && res.routing.model ? 'laya-' + res.routing.model : (res.model || run.engine);
+    if (!run.connected || engine !== run.engine) { run.connected = true; run.engine = engine; paintStatus(); }
+  } else if (run.connected) { run.connected = false; paintStatus(); }
+  if (res) { roundtrips.push(res.roundtrip_ms); if (roundtrips.length > 20) roundtrips.shift(); }
+  const dps = roundtrips.length ? roundtrips.length * 1000 / roundtrips.reduce((a, b) => a + b, 0) : null;
+  return {
+    qs, answers: res ? res.answers : null, decision,
+    timing: res ? { inference_ms: res.inference_ms != null ? res.inference_ms : res.latency_ms, roundtrip_ms: res.roundtrip_ms, decisions_per_s: dps } : {},
+    tokens: res && res.usage ? (res.usage.output_tokens || 0) : 0, error: err,
+  };
+}
+// A recorded tick (see _lib/recorder.mjs): { action, model_action, intervened, reason, extras, answers, timing, ... }.
+// The board is rebuilt from the seed with logic.step, exactly like a live run.
+function askReplay(state) {
+  const t = run.log.ticks[ep.i];
+  if (!t) return Promise.resolve(null);
+  const modelAction = t.model_action != null ? t.model_action : t.action;
+  return Promise.resolve({
+    qs: logic.questions(state), answers: t.answers || null,
+    decision: { action: modelAction, extras: t.extras || {} },
+    recordedShield: { intervened: !!t.intervened, reason: t.reason || '', action: t.action },
+    recordedAction: t.action, timing: t.timing || {}, tokens: (t.usage && t.usage.output_tokens) || 0,
+  });
+}
+const ask = state => run.mode === 'replay' ? askReplay(state) : askLive(state);
+function requestNext(state) { ep.pending = ask(state).then(r => { ep.result = r; if (r) onNextDecision(r); }); }
+
+/* ---- applying a decision = one tick ---- */
+function apply(res, now) {
+  const s = ep.state;
+  let action = res.decision.action, sh = { intervened: false, reason: '', action };
+  if (run.mode === 'replay') { sh = res.recordedShield; action = res.recordedAction; }
+  else if (run.shield) { sh = logic.shield(s, action, res.decision.extras || {}); action = sh.action; }
+  const out = logic.step(s, action);
+  ep.prev = s; ep.state = out.state; ep.tickStart = now; ep.headHot = 1; ep.i++;
+  counters.decisions++; if (sh.intervened) counters.interventions++; counters.tokens += res.tokens || 0;
+  panel.update({
+    questions: res.qs, answers: res.answers || {}, decision: res.decision, shield: sh,
+    timing: res.timing, counters: { ...counters },
+    status: { mode: run.mode === 'replay' ? 'replay' : 'live', connected: run.connected, engine: run.engine, policy: run.policy, shield: run.shield },
+  });
+  onApplied(res, out, sh, action, now);
+  paintHud();
+  if (out.done || (run.mode === 'replay' && ep.i >= run.log.ticks.length)) {
+    ep.dead = true; ep.deadAt = now; ep.pending = null; ep.result = null;
+    return;
+  }
+  requestNext(ep.state);
+}
+
+function paintHud() {
+  const sum = logic.summary(ep.state);
+  countUp($('hudScore'), sum.score);
+  countUp($('hudSecond'), sum.depth != null ? sum.depth : 0, { pop: false });
+  if (sum.score > best) { best = sum.score; localStorage.setItem(BEST_KEY, String(best)); countUp($('hudBest'), best); $('hudBestStat').classList.add('hot'); }
+  const total = run.mode === 'replay' ? run.log.ticks.length : MAX_STEPS;
+  const at = run.mode === 'replay' ? ep.i : sum.steps;
+  $('stepText').textContent = `${at} / ${total}`;
+  ringProgress($('ring'), at / total);
+}
+
+function startEpisode(now) {
+  const seed = run.mode === 'replay' ? (run.log.seed != null ? run.log.seed : 1) : ((Date.now() + run.seedCount++) % 1e6) + 1;
+  ep.state = logic.init(seed);
+  ep.prev = ep.state; ep.tickStart = now; ep.dead = false; ep.i = 0; ep.headHot = 0; ep.result = null; ep.bornAt = now;
+  $('hudBestStat').classList.remove('hot');
+  const st = $('stage'); st.classList.remove('born'); void st.offsetWidth; st.classList.add('born');
+  onEpisodeStart(ep.state, now);
+  paintHud();
+  requestNext(ep.state);
+}
+
+/* ---- the frame loop with sub-tick timing ---- */
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!ep.state) return;
+  const dt = now - last; last = now;
+  if (ep.dead) {
+    render(ep.state, ep.state, 1, { dead: true, deadT: (now - ep.deadAt) / 1000, paused: run.paused, dt, now });
+    if (!run.paused && now - ep.deadAt > 1500) { panel.reset(); startEpisode(now); }
+    return;
+  }
+  if (run.paused) { render(ep.prev, ep.state, 1, { paused: true, dt: 0, now }); return; }
+  let t = (now - ep.tickStart) / tickDur();
+  if (t >= 1) {
+    if (ep.result) { const r = ep.result; ep.result = null; apply(r, now); t = 0; }
+    else if (ep.pending === null && run.mode === 'replay') { ep.dead = true; ep.deadAt = now; }
+    else t = 1;                                   // the answer is still in flight: hold at the end of the glide
+  }
+  ep.headHot = Math.max(0, ep.headHot - dt / 320);
+  render(ep.prev, ep.state, t, { headHot: ep.headHot, dt, now });
+}
+
+/* ---- keys ---- */
+const actions = {
+  pause() { run.paused = !run.paused; overlay(run.paused, 'Paused', 'Press <kbd>Space</kbd> to continue'); if (!run.paused) { ep.tickStart = performance.now(); if (ep.dead) ep.deadAt = performance.now(); } },
+  faster() { run.speedIx = Math.min(SPEEDS.length - 1, run.speedIx + 1); paintStatus(); },
+  slower() { run.speedIx = Math.max(0, run.speedIx - 1); paintStatus(); },
+  reset() { counters.decisions = counters.interventions = counters.tokens = 0; roundtrips.length = 0; panel.reset(); startEpisode(performance.now()); if (run.paused) actions.pause(); },
+  policy() { if (run.mode === 'replay') return; run.policy = run.policy === 'model' ? 'heuristic' : 'model'; paintStatus(); },
+  shield() { if (run.mode === 'replay') return; run.shield = !run.shield; paintStatus(); },
+  back() { location.href = '../'; },
+};
+document.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = { ' ': 'pause', ArrowUp: 'faster', ArrowDown: 'slower', r: 'reset', R: 'reset', m: 'policy', M: 'policy', s: 'shield', S: 'shield', q: 'back', Q: 'back' }[e.key];
+  if (!k) return; e.preventDefault(); actions[k]();
+});
+document.querySelectorAll('footer.keys button').forEach(b => b.addEventListener('click', () => actions[b.dataset.key]()));
+
+/* ---- boot: live if the server answers, otherwise the recorded run ---- */
+async function boot() {
+  let ready = false;
+  if (!(params.get('mode') === 'replay')) {
+    try {
+      const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 2500);
+      const r = await fetch(BASE + '/readyz', { cache: 'no-store', signal: ctrl.signal }); clearTimeout(to);
+      const j = await r.json().catch(() => ({}));
+      ready = r.ok && j.status === 'ready';
+    } catch (e) { ready = false; }
+  }
+  if (ready) {
+    run.mode = 'live'; run.connected = true;
+    run.client = createClient({ baseUrl: BASE, model: params.get('model') || 'auto' });
+  } else {
+    try {
+      const r = await fetch(REPLAY_URL, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      run.log = await r.json();
+      if (!Array.isArray(run.log.ticks) || !run.log.ticks.length) throw new Error('empty recording');
+      run.mode = 'replay'; run.engine = run.log.engine || run.log.model || 'recorded';
+    } catch (e) {
+      run.mode = 'down';
+      overlay(true, 'Nothing to play', `No arbiter server at <b>${esc(BASE)}</b> and no recording at <b>${esc(REPLAY_URL)}</b>. Start the server (<b>./run.sh</b>) and reload, or add <b>?base=http://localhost:8010</b> to the URL.`);
+      paintStatus(); return;
+    }
+  }
+  paintStatus();
+  startEpisode(performance.now());
+  requestAnimationFrame(frame);
+  if (run.mode === 'live') setInterval(async () => {
+    try { const r = await fetch(BASE + '/readyz', { cache: 'no-store' }); const j = await r.json(); const ok = r.ok && j.status === 'ready'; if (ok !== run.connected) { run.connected = ok; paintStatus(); } }
+    catch (e) { if (run.connected) { run.connected = false; paintStatus(); } }
+  }, 10000);
+}
+
+/* =====================================================================================
+   DUNGEON — the game-specific part of the page.
+     actorPixel / onEpisodeStart / onApplied / onNextDecision / render, as in snake.
+   The board here is the room itself: the prose the model is reading, the two health
+   bars, the purse, and the ladder of thirty rooms down the side. No halo, because the
+   actions are words rather than directions; the panel carries the probabilities.
+   ===================================================================================== */
+const vis = {
+  particles: createParticles(), shake: createShake(),
+  bornAt: 0, hitAt: -1e9, healAt: -1e9, lootAt: -1e9, lastEvents: [], eventsAt: 0, action: null, veto: null,
+};
+const lerp = (a, b, t) => a + (b - a) * t;
+const card = () => {
+  const top = Math.round(56 * dpr), side = Math.round(16 * dpr);
+  return { x: padLeft(), y: top, w: W - padLeft() - side, h: H - top - side, side };
+};
+const padLeft = () => Math.round(16 * dpr);
+function actorPixel(state) {
+  if (!state || !W) return null;
+  const f = card();
+  return [(f.x + f.w * .26) / dpr, (f.y + f.h * .62) / dpr];
+}
+function onEpisodeStart(state, now) {
+  vis.bornAt = now; vis.hitAt = -1e9; vis.healAt = -1e9; vis.lootAt = -1e9;
+  vis.lastEvents = []; vis.action = null; vis.veto = null;
+}
+function onApplied(res, out, sh, action, now) {
+  vis.action = action; vis.veto = sh.intervened ? res.decision.action : null;
+  vis.lastEvents = out.events || []; vis.eventsAt = now;
+  const f = card();
+  if (vis.lastEvents.some(e => /hits you/.test(e))) {
+    vis.hitAt = now; vis.shake.kick(.7);
+    vis.particles.burst(f.x + f.w * .26, f.y + f.h * .62, { count: 14, speed: f.w * .5, size: 3 * dpr, life: .5, color: COLORS.danger });
+  }
+  if (action === 'heal') vis.healAt = now;
+  if (vis.lastEvents.some(e => /gold/.test(e))) {
+    vis.lootAt = now;
+    vis.particles.burst(f.x + f.w * .74, f.y + f.h * .62, { count: 16, speed: f.w * .4, size: 3 * dpr, life: .6, color: COLORS.orange });
+  }
+}
+function onNextDecision() {}
+
+function wrap(text, maxWidth) {
+  const words = String(text).split(' ');
+  const lines = []; let line = '';
+  for (const word of words) {
+    const next = line ? line + ' ' + word : word;
+    if (ctx.measureText(next).width > maxWidth && line) { lines.push(line); line = word; }
+    else line = next;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function bar(x, y, w, h, fraction, color, label) {
+  ctx.fillStyle = 'rgba(43,55,88,.8)';
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, h * .5); ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.roundRect(x, y, Math.max(h, w * Math.max(0, Math.min(1, fraction))), h, h * .5); ctx.fill();
+  if (label) {
+    ctx.fillStyle = 'rgba(139,149,179,.95)';
+    ctx.font = `${Math.round(11 * dpr)}px "JetBrains Mono", ui-monospace, monospace`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(label, x, y - 4 * dpr);
+  }
+}
+
+function render(prev, cur, t, fx = {}) {
+  if (!W) return;
+  const now = fx.now || performance.now(), dt = (fx.dt || 0) / 1000;
+  const dead = !!fx.dead && !cur.alive, deadT = fx.deadT || 0;
+  const born = Math.min(1, (now - vis.bornAt) / 450);
+  const f = card();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const [sx, sy] = vis.shake.offset(dt);
+  ctx.translate(sx * dpr, sy * dpr);
+  drawBoardDepth(ctx, W, H, { dpr, vignette: .85 });
+
+  // the room card
+  const cardW = f.w - 34 * dpr;
+  ctx.globalAlpha = born;
+  ctx.fillStyle = 'rgba(14,21,40,.92)';
+  ctx.strokeStyle = dead ? 'rgba(240,96,92,.6)' : 'rgba(85,131,255,.35)';
+  ctx.lineWidth = 2 * dpr; ctx.shadowColor = 'rgba(85,131,255,.25)'; ctx.shadowBlur = 20 * dpr;
+  ctx.beginPath(); ctx.roundRect(f.x, f.y, cardW, f.h, 14 * dpr); ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
+
+  // torchlight: a warm pool that breathes
+  const flick = .82 + .18 * Math.sin(now / 210) * Math.sin(now / 90);
+  const g = ctx.createRadialGradient(f.x + cardW * .5, f.y + f.h * .3, 8 * dpr, f.x + cardW * .5, f.y + f.h * .3, cardW * .75);
+  g.addColorStop(0, `rgba(255,140,51,${(.09 * flick).toFixed(3)})`); g.addColorStop(1, 'rgba(255,140,51,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.roundRect(f.x, f.y, cardW, f.h, 14 * dpr); ctx.fill();
+
+  // the prose the model is reading, wrapped
+  const pad = 20 * dpr;
+  ctx.fillStyle = COLORS.ink;
+  ctx.font = `${Math.round(Math.max(13, Math.min(19, cardW / 34)))}px "Instrument Sans", system-ui, sans-serif`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  const room = logic.encode(cur).split(' You have ')[0];
+  const lines = wrap(room, cardW - pad * 2);
+  const lh = Math.round(parseInt(ctx.font, 10) * 1.45);
+  lines.slice(0, 5).forEach((line, i) => {
+    ctx.globalAlpha = born * (1 - i * .06);
+    ctx.fillText(line, f.x + pad, f.y + pad + i * lh);
+  });
+  ctx.globalAlpha = born;
+
+  // the two sides of the room: you on the left, whatever is in the way on the right
+  const midY = f.y + f.h * .62;
+  const heroX = f.x + cardW * .26, foeX = f.x + cardW * .74;
+  const hurt = Math.max(0, 1 - (now - vis.hitAt) / 350);
+  const heal = Math.max(0, 1 - (now - vis.healAt) / 500);
+  ctx.save();
+  ctx.translate(heroX, midY + Math.sin(now / 600) * 2 * dpr);
+  ctx.fillStyle = dead ? COLORS.danger : (hurt > 0 ? COLORS.danger : COLORS.cobaltText);
+  ctx.shadowColor = heal > 0 ? 'rgba(99,198,138,.9)' : 'rgba(125,160,255,.6)'; ctx.shadowBlur = (12 + 24 * heal) * dpr;
+  ctx.beginPath(); ctx.arc(0, -14 * dpr, 11 * dpr, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.roundRect(-10 * dpr, 0, 20 * dpr, 26 * dpr, 6 * dpr); ctx.fill();
+  ctx.restore();
+  ctx.shadowBlur = 0;
+
+  const monster = cur.room.monster;
+  if (monster) {
+    const bob = Math.sin(now / 420 + 1) * 3 * dpr;
+    ctx.save(); ctx.translate(foeX, midY + bob);
+    ctx.fillStyle = 'rgba(240,96,92,.9)'; ctx.shadowColor = 'rgba(240,96,92,.5)'; ctx.shadowBlur = 14 * dpr;
+    const size = 10 * dpr + monster.strength * 2.4 * dpr;
+    ctx.beginPath(); ctx.moveTo(0, -size * 1.5); ctx.lineTo(size, size); ctx.lineTo(-size, size); ctx.closePath(); ctx.fill();
+    ctx.shadowBlur = 0; ctx.fillStyle = '#0A0F1E';
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * size * .32, size * .1, size * .13, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+    bar(foeX - 40 * dpr, midY + 52 * dpr, 80 * dpr, 7 * dpr, monster.hp / (2 + monster.strength * 2), COLORS.danger,
+      `${monster.name.split(',')[0]} · hits up to ${monster.max_hit}`);
+  } else if (cur.room.treasure && !cur.room.looted) {
+    ctx.save(); ctx.translate(foeX, midY);
+    ctx.fillStyle = COLORS.orange; ctx.shadowColor = 'rgba(255,140,51,.6)'; ctx.shadowBlur = 16 * dpr;
+    ctx.beginPath(); ctx.roundRect(-16 * dpr, -10 * dpr, 32 * dpr, 24 * dpr, 4 * dpr); ctx.fill();
+    ctx.restore(); ctx.shadowBlur = 0;
+  }
+
+  // hit points, potions, gold
+  bar(heroX - 45 * dpr, midY + 52 * dpr, 90 * dpr, 7 * dpr, cur.hp / cur.max_hp,
+    cur.hp <= cur.max_hp * .34 ? COLORS.danger : COLORS.cobalt, `you · ${cur.hp}/${cur.max_hp} hp`);
+  ctx.fillStyle = 'rgba(139,149,179,.95)';
+  ctx.font = `${Math.round(12 * dpr)}px "JetBrains Mono", ui-monospace, monospace`;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillText(`${cur.potions} potions`, heroX - 45 * dpr, midY + 66 * dpr);
+  ctx.fillStyle = COLORS.orange;
+  ctx.fillText(`${cur.gold} gold`, heroX - 45 * dpr, midY + 82 * dpr);
+
+  // what just happened, in the room's own words
+  if (vis.lastEvents.length && now - vis.eventsAt < 2600) {
+    const age = (now - vis.eventsAt) / 2600;
+    ctx.globalAlpha = born * Math.max(0, 1 - age * age);
+    ctx.fillStyle = COLORS.ink;
+    ctx.font = `${Math.round(13 * dpr)}px "JetBrains Mono", ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    vis.lastEvents.slice(-2).forEach((e, i) => ctx.fillText(e, f.x + cardW / 2, f.y + f.h - (36 - i * 17) * dpr));
+    ctx.globalAlpha = born;
+  }
+  if (vis.veto) {
+    ctx.fillStyle = COLORS.danger;
+    ctx.font = `${Math.round(12 * dpr)}px "JetBrains Mono", ui-monospace, monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`shield vetoed "${vis.veto}"`, f.x + cardW / 2, f.y + f.h - 54 * dpr);
+  }
+
+  // the ladder: thirty rooms, the one you are in lit
+  const ladderX = f.x + cardW + 16 * dpr, ladderTop = f.y + 12 * dpr, ladderH = f.h - 24 * dpr;
+  const stepH = ladderH / cur.rooms;
+  for (let i = 1; i <= cur.rooms; i++) {
+    const y = ladderTop + (i - 1) * stepH;
+    const here = i === cur.depth, done = i < cur.depth;
+    ctx.fillStyle = here ? COLORS.cobalt : done ? 'rgba(125,160,255,.35)' : 'rgba(43,55,88,.8)';
+    ctx.beginPath(); ctx.roundRect(ladderX, y + stepH * .18, here ? 12 * dpr : 8 * dpr, Math.max(2 * dpr, stepH * .6), 2 * dpr); ctx.fill();
+  }
+
+  vis.particles.step(dt); vis.particles.draw(ctx, 1);
+  if (dead) drawDangerVignette(ctx, W, H, Math.max(0, 1 - deadT / .55));
+  if (fx.paused) { ctx.fillStyle = 'rgba(10,15,30,.45)'; ctx.fillRect(-20 * dpr, -20 * dpr, W + 40 * dpr, H + 40 * dpr); }
+  ctx.globalAlpha = 1;
+}
+boot();
+</script>
+</body>
+</html>
