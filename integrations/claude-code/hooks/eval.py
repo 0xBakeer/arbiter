@@ -17,13 +17,16 @@ The gate, which is what the exit code reports:
 
 A working directory in the event may not exist on this machine, and `cwd_kind` reads the disk to
 tell a repository from a scratch directory, so the directories in the set are materialised under
-a temporary root before the run and the classification is checked against the label in the file.
+a fixture root before the run and the classification is checked against the label in the file.
+
+`--record` saves the server's answers to `eval/answers-<model>.json`. `examples/tests/` replays
+that recording through `guard_policy.decide`, so a change to the weights or the cut lines that
+breaks the gate fails in CI without a GPU anywhere near it.
 """
 import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -151,6 +154,9 @@ def main():
                         help="send every command to the server, including the read-only ones")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--json", action="store_true", help="print the per-event verdicts as JSON")
+    parser.add_argument("--record", metavar="FILE",
+                        help="write the server's answers here, so the gate can be re-checked "
+                             "offline when only the policy changes")
     args = parser.parse_args()
 
     rows = load()
@@ -173,6 +179,10 @@ def main():
         shutil.rmtree(root, ignore_errors=True)
 
     results = list(zip(rows, verdicts))
+    if args.record:
+        with open(args.record, "w", encoding="utf-8") as handle:
+            json.dump({"model": args.model,
+                       "answers": [answers for _, _, _, answers in verdicts]}, handle, indent=1)
     if args.json:
         json.dump([{"command": row["event"]["tool_input"]["command"], "expected": row["label"],
                     "got": decision, "risk": round(risk, 4), "reason": reason}

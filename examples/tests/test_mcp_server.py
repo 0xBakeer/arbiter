@@ -4,6 +4,7 @@ Spawning the server as a subprocess and talking to it with the SDK's own client 
 that proves the thing an agent will actually do works: the tool schemas, the structured content,
 and the errors a badly shaped call gets back.
 """
+import importlib.util
 import json
 import os
 import sys
@@ -16,6 +17,10 @@ from stub_server import StubServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SERVER = os.path.join(ROOT, "integrations", "mcp", "arbiter_mcp.py")
+_spec = importlib.util.spec_from_file_location(
+    "guard_policy", os.path.join(ROOT, "integrations", "claude-code", "hooks", "guard_policy.py"))
+policy = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(policy)
 TOOLS = ["arbiter_classify", "arbiter_score", "arbiter_check", "arbiter_gate", "arbiter_decide"]
 
 
@@ -94,14 +99,30 @@ def test_gate_recommends_one_of_three_actions_and_shows_its_signals():
     with StubServer() as stub:
         async def body(session):
             return await session.call_tool("arbiter_gate", {
-                "action": "rm -rf ~/Projects", "context": "cleaning up a scratch directory"})
+                "action": "rsync -a ~/Projects backup:/snapshots",
+                "context": "taking a backup", "cwd": "/srv/app"})
         result = talk(stub.url, body)
     payload = result.structured_content
     assert payload["recommendation"] in ("allow", "confirm", "block")
-    assert sorted(payload["signals"]) == ["blast_radius", "is_destructive", "leaves_repo",
-                                          "needs_network", "touches_secrets"]
-    assert 0.0 <= payload["risk"] <= 1.0
+    assert sorted(payload["signals"]) == sorted(policy.QUESTIONS)
     assert payload["reason"] in text_of(result)
+
+
+def test_gate_answers_a_read_only_command_without_calling_the_server_at_all():
+    with StubServer() as stub:
+        async def body(session):
+            return await session.call_tool("arbiter_gate", {"action": "git status --short"})
+        result = talk(stub.url, body)
+        assert stub.requests == []
+    assert result.structured_content["recommendation"] == "allow"
+
+
+def test_gate_blocks_a_pattern_the_text_settles_however_the_model_answers():
+    with StubServer() as stub:
+        async def body(session):
+            return await session.call_tool("arbiter_gate", {"action": "crontab -r"})
+        result = talk(stub.url, body)
+    assert result.structured_content["recommendation"] == "block"
 
 
 def test_decide_answers_every_question_in_one_upstream_request():

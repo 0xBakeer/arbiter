@@ -24,6 +24,7 @@ Install: pip install "mcp>=2"   (or `pip install .` in this directory for the `a
 Configuration comes from the environment: ARBITER_URL (default http://localhost:8010),
 ARBITER_API_KEY (optional), ARBITER_MODEL (default "auto" -- let the server route).
 """
+import importlib.util
 import json
 import os
 import urllib.error
@@ -49,46 +50,23 @@ TIMEOUT = float(os.environ.get("ARBITER_TIMEOUT", "30"))
 MAX_OPTIONS = 12
 MIN_LEVELS, MAX_LEVELS = 2, 10
 
-# Same question set and the same thresholds as examples/tool_call_guard.py. They are repeated
-# here rather than imported because this file is installed on its own, away from the repo.
-GATE_QUESTIONS = {
-    "is_destructive": {
-        "type": "noul",
-        "instructions": ("Running this action destroys or irreversibly changes something: "
-                         "deleting files, dropping data, force-pushing, overwriting history, "
-                         "terminating infrastructure."),
-        "criteria": {"true": "data or state is lost and cannot be trivially restored",
-                     "false": "it reads, builds, tests, or makes a change that is easy to undo"},
-    },
-    "touches_secrets": {
-        "type": "noul",
-        "instructions": ("This action reads, prints, copies or transmits credentials: private "
-                         "keys, tokens, passwords, .env files, cloud credentials, keychains."),
-    },
-    "leaves_repo": {
-        "type": "noul",
-        "instructions": "This action reads or writes outside the working directory it runs in.",
-    },
-    "needs_network": {
-        "type": "noul",
-        "instructions": "This action talks to the network: fetching, uploading, deploying, or calling an API.",
-    },
-    "blast_radius": {
-        "type": "score",
-        "instructions": "If this action does the wrong thing, how far does the damage reach?",
-        "criteria": ["nothing outside this shell session",
-                     "files in this one project",
-                     "the whole developer machine",
-                     "shared or production systems other people depend on"],
-    },
-}
-GATE_DENY_DESTRUCTIVE = 0.75
-GATE_DENY_SECRETS = 0.70
-GATE_DENY_BLAST = 2.40
-# Well above 0.5: the model is not shy about a mild yes, and `npm test` scores around 0.48 on
-# "is this destructive". A gate that stops for that is a gate agents learn to ignore.
-GATE_ASK_SIGNAL = 0.55
-GATE_ASK_BLAST = 1.50
+# The gate's questions, weights, cut lines and text rules live in one place, next to the Claude
+# Code hook, so the hook, this tool and examples/tool_call_guard.py cannot drift apart. It is
+# loaded by path rather than imported as a package because this file is also installed on its
+# own; ARBITER_GUARD_POLICY points at the copy when it has been moved somewhere else.
+_POLICY_PATH = os.environ.get("ARBITER_GUARD_POLICY") or os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "claude-code", "hooks", "guard_policy.py")
+if not os.path.exists(_POLICY_PATH):
+    raise SystemExit("arbiter-mcp needs the guard policy at %s. Copy "
+                     "integrations/claude-code/hooks/guard_policy.py next to this file's "
+                     "sibling directory, or set ARBITER_GUARD_POLICY." % _POLICY_PATH)
+_POLICY_SPEC = importlib.util.spec_from_file_location("guard_policy", _POLICY_PATH)
+policy = importlib.util.module_from_spec(_POLICY_SPEC)
+_POLICY_SPEC.loader.exec_module(policy)
+
+# The hook speaks Claude Code's vocabulary; an agent calling this tool gets the MCP one.
+GATE_WORD = {"allow": "allow", "ask": "confirm", "deny": "block"}
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True,
                             openWorldHint=True)
@@ -268,43 +246,28 @@ def arbiter_check(state: Any, instructions: str, true_desc: Optional[str] = None
 
 @server.tool(
     title="Gate an action",
-    description=("Judge whether an action -- a shell command, a deploy, a file write -- is safe "
-                 "to run. Returns allow | confirm | block with the five signals behind it. Call "
-                 "this before doing anything destructive; it costs tens of milliseconds."),
+    description=("Judge whether a shell command is safe to run. Returns allow | confirm | block "
+                 "with the risk score and the signals behind it. Call it before anything "
+                 "destructive; it costs tens of milliseconds, and read-only commands are "
+                 "answered without a round trip at all."),
     annotations=READ_ONLY, structured_output=False)
-def arbiter_gate(action: str, context: Optional[str] = None,
+def arbiter_gate(action: str, context: Optional[str] = None, cwd: Optional[str] = None,
               model: Optional[str] = None) -> CallToolResult:
     require_text(action, "action")
-    state: Dict[str, Any] = {"action": action}
-    if context:
-        state["context"] = context
-    response = call_arbiter(state, GATE_QUESTIONS, model)
-    signals = {qid: (a["noul"] if a["type"] == "noul" else a["score"])
+    if policy.is_read_only(action):
+        decision, risk, reason = policy.decide(None, action)
+        return result("%s: %s" % (GATE_WORD[decision], reason),
+                      {"recommendation": GATE_WORD[decision], "risk": risk, "signals": {},
+                       "reason": reason, "checkpoint": None, "latency_ms": 0.0})
+    state = policy.build_state(action, context, cwd)
+    response = call_arbiter(state, policy.QUESTIONS, model)
+    decision, risk, reason = policy.decide(response["answers"], action)
+    signals = {qid: round(float(a["noul"] if a["type"] == "noul" else a["score"]), 4)
                for qid, a in response["answers"].items()}
-    blast = signals["blast_radius"]
-
-    if signals["touches_secrets"] >= GATE_DENY_SECRETS:
-        recommendation, why = "block", "touches credentials (%.2f)" % signals["touches_secrets"]
-    elif blast >= GATE_DENY_BLAST:
-        recommendation, why = "block", "blast radius %.2f of 3 -- shared or production systems" % blast
-    elif signals["is_destructive"] >= GATE_DENY_DESTRUCTIVE and blast >= 2.0:
-        recommendation, why = "block", "destructive (%.2f) with blast radius %.2f" % (
-            signals["is_destructive"], blast)
-    else:
-        hot = {k: v for k, v in signals.items()
-               if k != "blast_radius" and v >= GATE_ASK_SIGNAL}
-        if hot or blast >= GATE_ASK_BLAST:
-            recommendation = "confirm"
-            why = ", ".join("%s %.2f" % kv for kv in sorted(hot.items(), key=lambda kv: -kv[1])) \
-                or "blast radius %.2f" % blast
-        else:
-            recommendation, why = "allow", "no signal above %.2f, blast radius %.2f" % (
-                GATE_ASK_SIGNAL, blast)
-
-    payload = {"recommendation": recommendation, "risk": round(blast / 3.0, 4),
-               "signals": {k: round(v, 4) for k, v in signals.items()}, "reason": why}
+    payload = {"recommendation": GATE_WORD[decision], "risk": round(risk, 4),
+               "signals": signals, "reason": reason}
     payload.update(meta(response))
-    return result("%s: %s" % (recommendation, why), payload)
+    return result("%s: %s" % (GATE_WORD[decision], reason), payload)
 
 
 @server.tool(
