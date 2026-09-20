@@ -91,3 +91,62 @@ def test_the_configured_engine_is_a_package_under_engines(monkeypatch):
     monkeypatch.setenv("ARBITER_ENGINE", "nope")
     with pytest.raises(ModuleNotFoundError, match="engines.nope"):
         engine_from_env()
+
+
+# -- the MLX backend, on a machine that may have no MLX at all -------------------------------
+#
+# Everything laya-mlx supplies is imported by `port()` on first use, so the module itself loads
+# anywhere and these run on CI, on Linux, and in this repo's own test suite on any machine.
+
+def test_the_mlx_engine_is_dispatched_by_name_and_says_so(monkeypatch):
+    loader = importlib.import_module("engines.laya_mlx.loader")
+    built = {}
+
+    class FakeEngine:
+        def __init__(self, **kw):
+            built.update(kw)
+
+    monkeypatch.setattr(loader, "port", lambda: None)      # no MLX needed to test the dispatch
+    monkeypatch.setattr(loader, "LayaMlxEngine", FakeEngine)
+    monkeypatch.setenv("ARBITER_ENGINE", "laya_mlx")
+    monkeypatch.setenv("ARBITER_MODELS", "english,multilingual")
+    monkeypatch.setenv("ARBITER_DTYPE", "fp32")
+    monkeypatch.delenv("ARBITER_MODELS_DIR", raising=False)
+
+    eng = engine_from_env()
+    assert isinstance(eng, FakeEngine)
+    # what /readyz reports: the package that was selected, not a name a backend claims
+    assert eng.engine == "laya_mlx"
+    assert built["names"] == ("english", "multilingual")
+    assert built["dtype_mode"] == "fp32"
+    assert built["models_dir"] == "models/laya-mlx"      # its own weights, not the torch tree
+
+
+def test_the_mlx_engine_refuses_a_checkpoint_it_has_no_repo_for(monkeypatch):
+    loader = importlib.import_module("engines.laya_mlx.loader")
+    monkeypatch.setattr(loader, "port", lambda: None)
+    monkeypatch.setenv("ARBITER_ENGINE", "laya_mlx")
+    monkeypatch.setenv("ARBITER_MODELS", "english,klingon")
+    with pytest.raises(ValueError, match="klingon"):
+        engine_from_env()
+
+
+def test_the_mlx_engine_refuses_a_machine_that_is_not_apple_silicon(monkeypatch):
+    """One line at startup. The alternative is an ImportError from inside a wheel that is not
+    built for this architecture, several frames below anything the operator set."""
+    loader = importlib.import_module("engines.laya_mlx.loader")
+    monkeypatch.setattr(loader.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(loader.platform, "machine", lambda: "x86_64")
+    with pytest.raises(RuntimeError, match="Apple silicon only"):
+        loader.require_apple_silicon()
+
+
+def test_mps_is_not_one_of_the_mlx_device_names():
+    """`mps` is torch's name for the same GPU, and taking it here would serve the wrong backend
+    under the right label. `auto` is the GPU, which is the only accelerator MLX has."""
+    loader = importlib.import_module("engines.laya_mlx.loader")
+    assert loader.resolve_device("auto") == "gpu"
+    assert loader.resolve_device("metal") == "gpu"
+    assert loader.resolve_device("cpu") == "cpu"
+    with pytest.raises(ValueError, match="not an MLX device"):
+        loader.resolve_device("mps")
