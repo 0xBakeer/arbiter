@@ -13,7 +13,19 @@ would measure if you ran the recipe yourself. `./run.sh` prints the version it w
 
 ## v0.1.0 — 2026-09-20
 
-First release.
+First release. Renamed from laya-spark to arbiter before it: the repository is the serving
+layer, so it is named after neither the model it serves nor the machine it runs on. Everything
+that names the product is `arbiter` (the environment variables are `ARBITER_*`, with no aliases
+for the old names, since nothing public depended on them) and everything that names the model
+is still `laya` — the checkpoints, the SDK, and the `laya-english` / `laya-multilingual` /
+`laya-typed-decisions` model ids a client sends.
+
+The layout follows from the same idea. `server/` is model-agnostic: the HTTP surface, the
+cross-request batcher and a four-method engine interface. `engines/laya/` implements that
+interface over the SDK and `ARBITER_ENGINE` selects it, so a model trained here later plugs in
+without touching the server. `recipes/nvidia/` holds the install-and-serve notes for CUDA and
+`recipes/apple/` is the Apple Silicon lane, which is next and not yet measured; `bench/results.md`
+now has a section per machine so the two cannot be confused for each other.
 
 ### Defaults that changed
 
