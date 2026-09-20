@@ -33,7 +33,7 @@ COPY . /app
 
 ENV PORT=8010 \
     HOST=0.0.0.0 \
-    DEVICE=cuda \
+    ARBITER_DEVICE=cuda \
     ARBITER_MODE=eager \
     ARBITER_DTYPE=autocast \
     ARBITER_MODELS=english,multilingual,typed-decisions \

@@ -2,7 +2,7 @@
 
 Three things make this faster than calling `laya.Agent.system_one` per request:
 
-1. **bf16 parameters instead of fp32 + autocast.** The checkpoints were trained in bf16
+1. **Half-precision parameters instead of fp32 + autocast.** The checkpoints were trained in bf16
    (`"amp_dtype": "bf16"` in every `rl_agent_config.json`), and the SDK loads fp32 weights and
    casts them on every forward under `torch.autocast`. Converting once at load removes the cast
    and a third of the weight traffic. Logits and softmax stay in fp32, exactly as the SDK does.
@@ -42,6 +42,44 @@ from server.errors import OptionBudgetError
 # under the downloaded tree.
 SUBFOLDER = {"english": None, "multilingual": "multilingual", "typed-decisions": "typed-decisions"}
 MODEL_NAMES = tuple(SUBFOLDER)
+
+
+# --------------------------------------------------------------------------- device and dtype
+
+def resolve_device(spec: str = "auto") -> str:
+    """`ARBITER_DEVICE`, or the best accelerator this machine actually has.
+
+    The same checkout serves a CUDA box and a Mac, and the only honest default is the one the
+    hardware decides. An explicit value is passed straight through, including a bad one, so that
+    `ARBITER_DEVICE=cuda` on a machine without CUDA fails loudly instead of quietly running a
+    tenth as fast on the CPU.
+    """
+    if spec and spec != "auto":
+        return spec
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
+def supported_dtypes(device: torch.device) -> Tuple[str, ...]:
+    """The parameter modes worth running on this device. Everything else collapses to fp32.
+
+    CUDA gets bf16 from compute capability 8.0 up, where there are bf16 tensor cores, and
+    `autocast` because that is the mode the SDK itself runs in. MPS gets whole-model fp16 and
+    bf16 -- both are native on Apple silicon -- but not autocast: torch's MPS autocast is fp16
+    and covers a different op set, which would make `ARBITER_DTYPE=autocast` mean two different
+    arithmetics on the two machines. On CPU every half dtype is slower than fp32 at this size.
+    """
+    if device.type == "cuda":
+        return ("fp32", "autocast", "bf16") if torch.cuda.get_device_capability(device)[0] >= 8 else ("fp32",)
+    if device.type == "mps":
+        return ("fp32", "fp16", "bf16")
+    return ("fp32",)
+
+
+PARAM_DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 # --------------------------------------------------------------------------- request shaping
@@ -170,22 +208,26 @@ class GraphRunner:
 class Checkpoint:
     """One loaded Laya checkpoint plus everything needed to run and decode a batch of rows.
 
-    `dtype_mode` picks how bf16 is used, and the two are not equivalent:
+    `dtype_mode` picks how half precision is used, and the modes are not equivalent:
 
       autocast  fp32 parameters under `torch.autocast(bf16)`, which is what the SDK does. Matmuls
                 run in bf16; layer norms, the residual stream and the softmaxes stay fp32.
       bf16      bf16 parameters and no autocast. Everything runs in bf16, including the residual
                 stream through 28 layers, which is where the two diverge.
+      fp16      the same, in fp16: more mantissa than bf16 and far less range, so it is the one
+                that can overflow rather than merely round.
+      fp32      no half precision anywhere.
 
+    A mode the device cannot use collapses to fp32; `supported_dtypes` says which those are.
     Measured, the difference is not decorative: see the equivalence table in README.md.
     """
 
-    def __init__(self, name: str, models_dir: str, device: str = "cuda", mode: str = "eager",
+    def __init__(self, name: str, models_dir: str, device: str = "auto", mode: str = "eager",
                  max_markers: int = 32, dtype_mode: str = "autocast"):
         from laya.agent import Agent
 
         self.name = name
-        self.agent = Agent(models_dir, device=device, subfolder=SUBFOLDER[name])
+        self.agent = Agent(models_dir, device=resolve_device(device), subfolder=SUBFOLDER[name])
         self.device = self.agent.device
         self.tok = self.agent.tok
         self.cfg = self.agent.cfg
@@ -207,27 +249,27 @@ class Checkpoint:
             if cfg is not None:
                 cfg.reference_compile = False
 
-        # bf16 parameters, no autocast. Only where bf16 is actually a win: pre-Ampere cards have
-        # no bf16 tensor cores, and on CPU it is slower than fp32 for this size of model.
-        # bf16 is only worth anything from compute capability 8.0 up, and on CPU it is slower
-        # than fp32 at this size, so both bf16 paths collapse to plain fp32 elsewhere.
-        bf16_ok = self.device.type == "cuda" and torch.cuda.get_device_capability(self.device)[0] >= 8
-        self.dtype_mode = dtype_mode if bf16_ok else "fp32"
-        self.param_dtype = torch.float32
+        # Half-precision parameters, no autocast, and only where the device has something to
+        # run them on. Anything else is fp32, which is what the SDK does on those devices too.
+        self.dtype_mode = dtype_mode if dtype_mode in supported_dtypes(self.device) else "fp32"
         self.autocast = self.dtype_mode == "autocast"
-        if self.dtype_mode == "bf16":
-            self.model.to(torch.bfloat16)
-            self.param_dtype = torch.bfloat16
+        self.param_dtype = PARAM_DTYPES.get(self.dtype_mode, torch.float32)
+        if self.param_dtype is not torch.float32:
+            self.model.to(self.param_dtype)
             # The act head is the one module that must stay fp32: it is fed
             # `torch.cat([h[:, 0].float(), feats])`, where `feats` is built from the fp32 logits,
-            # so a bf16 weight meets an fp32 activation. Autocast hid that by casting the input;
-            # without autocast it is a hard dtype error. It is three small Linears, and keeping
-            # it fp32 makes the act probability marginally closer to the reference, not further.
+            # so a half-precision weight meets an fp32 activation. Autocast hid that by casting
+            # the input; without autocast it is a hard dtype error. It is three small Linears,
+            # and keeping it fp32 makes the act probability marginally closer to the reference,
+            # not further.
             self.model.act_head.to(torch.float32)
         self.model.eval()
 
         self.graphs: Optional[GraphRunner] = None
-        if mode == "graphs" and self.device.type == "cuda":
+        if mode == "graphs":
+            if self.device.type != "cuda":
+                raise ValueError("ARBITER_MODE=graphs is CUDA graph capture and cannot run on "
+                                 "%s; use ARBITER_MODE=eager" % self.device.type)
             self.graphs = GraphRunner(self.run_model, self.device, self.pad_id, self.cls_id,
                                       self.max_len, max_markers)
 
@@ -332,18 +374,18 @@ class LayaEngine(Engine):
     """Every selected checkpoint, the SDK's router over them, and the decoding of a batch."""
 
     def __init__(self, models_dir: str = "models/laya", names: Tuple[str, ...] = MODEL_NAMES,
-                 device: str = "cuda", mode: str = "eager", max_batch: int = 64,
+                 device: str = "auto", mode: str = "eager", max_batch: int = 64,
                  wait_ms: float = 2.0, max_queue: int = 256, max_markers: int = 32,
                  dtype_mode: str = "autocast"):
         from laya.router import Router
 
         self.models_dir = models_dir
-        self.device = device
+        self.device = resolve_device(device)
         self.mode = mode
         self.dtype_mode = dtype_mode
         self.max_markers = max_markers
         self.ckpts: Dict[str, Checkpoint] = {}
-        self.router = Router(device=device, max_loaded=len(names) or 1)
+        self.router = Router(device=self.device, max_loaded=len(names) or 1)
         super().__init__(names, max_batch=max_batch, wait_ms=wait_ms, max_queue=max_queue)
         self.default = "english" if "english" in self.ckpts else next(iter(self.ckpts))
         self.router.default = self.default
@@ -352,6 +394,10 @@ class LayaEngine(Engine):
     def load(self, name: str) -> None:
         ck = Checkpoint(name, self.models_dir, device=self.device, mode=self.mode,
                         max_markers=self.max_markers, dtype_mode=self.dtype_mode)
+        # What the checkpoint settled on, which is what /readyz should report: a mode the device
+        # cannot use collapses to fp32, and a server claiming autocast while running fp32 would
+        # put the wrong label on every measurement taken against it.
+        self.dtype_mode = ck.dtype_mode
         self.ckpts[name] = ck
         # Hand the already-built Agent to the router so it never loads a second copy.
         self.router.attach(name, ck.agent)
@@ -388,7 +434,7 @@ def from_env() -> LayaEngine:
     return LayaEngine(
         models_dir=os.environ.get("ARBITER_MODELS_DIR", "models/laya"),
         names=names,
-        device=os.environ.get("DEVICE", "cuda"),
+        device=os.environ.get("ARBITER_DEVICE", "auto"),
         mode=os.environ.get("ARBITER_MODE", "eager"),
         max_batch=int(os.environ.get("ARBITER_MAX_BATCH", "64")),
         wait_ms=float(os.environ.get("ARBITER_BATCH_WAIT_MS", "2")),
