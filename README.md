@@ -1,5 +1,17 @@
 # arbiter
 
+[![Listed on laya-ai.com](https://laya-ai.com/badges/listed-on-laya-ai.svg)](https://laya-ai.com/projects#project-0xbakeer-arbiter)
+[![version](https://img.shields.io/github/v/tag/0xBakeer/arbiter?label=version)](https://github.com/0xBakeer/arbiter/tags)
+[![license](https://img.shields.io/github/license/0xBakeer/arbiter)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)](recipes)
+[![NVIDIA](https://img.shields.io/badge/NVIDIA-CUDA%2013-76B900?logo=nvidia&logoColor=white)](recipes/nvidia/README.md)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-MPS%20%7C%20MLX-000000?logo=apple&logoColor=white)](recipes/apple/README.md)
+[![API](https://img.shields.io/badge/API-Jev--compatible-5B5BD6)](#the-api)
+[![model](https://img.shields.io/badge/model-Laya-FFD21E?logo=huggingface&logoColor=black)](https://huggingface.co/convaiinnovations/laya)
+[![MCP](https://img.shields.io/badge/MCP-server-8A2BE2)](integrations/mcp)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-D97757?logo=claude&logoColor=white)](integrations/claude-code)
+[![stars](https://img.shields.io/github/stars/0xBakeer/arbiter?style=social)](https://github.com/0xBakeer/arbiter)
+
 Serve typed-decision models — Laya or your own — on your GPU or your Mac, with a Jev-compatible
 API.
 
